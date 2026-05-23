@@ -1,351 +1,357 @@
 import random
 import string
 import os
-from docx import Document # type: ignore
-from docx.shared import Pt # type: ignore
-from docx.enum.text import WD_ALIGN_PARAGRAPH # type: ignore
-from docx.oxml import OxmlElement # type: ignore
-from docx.oxml.ns import qn # type: ignore
+from openpyxl import load_workbook  # type: ignore
+from docx import Document  # type: ignore
+from docx.shared import Pt, Inches, RGBColor  # type: ignore
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT, WD_TAB_LEADER  # type: ignore
+from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE  # type: ignore
+from docx.enum.section import WD_ORIENT  # type: ignore
+from docx.oxml import OxmlElement  # type: ignore
+from docx.oxml.ns import qn  # type: ignore
 
 ROWS = 8
 COLS = 12
 
+EXCEL_PATH = r"C:\Users\riley\OneDrive\Desktop\wordsearch_booklet\Book2.xlsx"
 
-# -----------------------------
-# YOUR PUZZLES GO HERE
-# -----------------------------
-PUZZLES = [
-    # 1 Flowers
-[
-("ROSE", 1, 2),
-("LILLY", 2, 5),
-("TULIP", 3, 1),
-("DAISY", 4, 4),
-("BLOOM", 5, 2),
-("SMELL", 6, 6),
-("BUD", 7, 3),
-("PETAL", 8, 5),
-],
+TITLE_FONT_SIZE = 26
+GRID_FONT_SIZE = 36
+WORD_FONT_SIZE = 20
 
-# 2 Garden Tools
-[
-("SHOVEL", 1, 2),
-("RAKE", 2, 6),
-("HOE", 3, 1),
-("GLOVES", 4, 3),
-("PAIL", 5, 7),
-("SHEARS", 6, 2),
-("STAKE", 7, 4),
-("SPADE", 8, 6),
-],
+GRID_CELL_WIDTH = 56
+GRID_ROW_HEIGHT = 48
+WORD_BANK_ROW_HEIGHT = 20
+WORD_BANK_COL_WIDTH = 150
 
-# 3 Vegetables
-[
-("CARROT", 1, 1),
-("ONION", 2, 3),
-("POTATO", 3, 5),
-("CORN", 4, 2),
-("BEANS", 5, 7),
-("PEAS", 6, 4),
-("TOMATO", 7, 1),
-("GARLIC", 8, 5),
-],
+TOP_MARGIN = 0.2
+BOTTOM_MARGIN = 0.2
+LEFT_MARGIN = 0.25
+RIGHT_MARGIN = 0.25
 
-# 4 Fruits
-[
-("APPLE", 1, 2),
-("PEAR", 2, 6),
-("PLUM", 3, 1),
-("PEACH", 4, 3),
-("LEMON", 5, 5),
-("BERRY", 6, 2),
-("MELON", 7, 4),
-("CHERRY", 8, 1),
-],
+ANSWER_TITLE_SIZE = 16
+ANSWER_GRID_FONT_SIZE = 14
+ANSWER_CELL_SIZE = 23
+ANSWER_BLOCK_HEIGHT = 235
 
-# 5 Seeds
-[
-("SEED", 1, 3),
-("PLANT", 2, 1),
-("SOW", 3, 5),
-("GROW", 4, 2),
-("SPROUT", 5, 4),
-("SMALL", 6, 1),
-("SOIL", 7, 6),
-("BURY", 8, 2),
-],
+def load_puzzles_from_excel(file_path):
+    wb = load_workbook(file_path, data_only=True)
+    ws = wb.worksheets[0]  # sheet 1 only
 
-# 6 Plants
-[
-("PLANT", 1, 2),
-("WATER", 2, 5),
-("STEM", 3, 1),
-("ROOT", 4, 3),
-("GROW", 5, 6),
-("SOIL", 6, 2),
-("LIGHT", 7, 4),
-("CARE", 8, 1),
-],
+    puzzle_titles = []
+    puzzles = []
 
-# 7 Trees
-[
-("TREE", 1, 3),
-("TRUNK", 2, 1),
-("BRANCH", 3, 2),
-("WOOD", 4, 6),
-("ROOT", 5, 4),
-("BARK", 6, 2),
-("SHADE", 7, 5),
-("TALL", 8, 1),
-],
+    for excel_row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if not row or row[0] is None:
+            continue
 
-# 8 Leaves
-[
-("LEAF", 1, 2),
-("GREEN", 2, 3),
-("BROWN", 3, 1),
-("FALL", 4, 5),
-("CRISP", 5, 2),
-("FRESH", 6, 4),
-("PLANT", 7, 6),
-("PILE", 8, 1),
-],
+        title = str(row[0]).strip()
+        if title == "":
+            continue
 
-# 9 Soil
-[
-("SOIL", 1, 1),
-("TILL", 2, 5),
-("MUD", 3, 8),
-("EARTH", 4, 2),
-("GROUND", 5, 3),
-("RICH", 6, 7),
-("PLANT", 7, 4),
-("DARK", 8, 6),
-],
+        words = []
+        for cell in row[1:]:
+            if cell is None:
+                continue
 
-# 10 Watering
-[
-("WATER", 1, 2),
-("HOSE", 2, 6),
-("CAN", 3, 1),
-("SPRAY", 4, 3),
-("POUR", 5, 5),
-("SOAK", 6, 7),
-("GROW", 7, 2),
-("DROP", 8, 4),
-],
+            word = str(cell).strip().upper()
+            if word == "":
+                continue
 
-# 11 Sunshine
-[
-("SUN", 1, 3),
-("WARM", 2, 6),
-("LIGHT", 3, 2),
-("BRIGHT", 4, 1),
-("SKY", 5, 5),
-("SUMMER", 6, 2),
-("HEAT", 7, 4),
-("GLOW", 8, 6),
-],
+            if len(word) > COLS:
+                print(f"Skipping word '{word}' in row {excel_row_num}: too long for {COLS} columns")
+                continue
 
-# 12 Rain
-[
-("RAIN", 1, 2),
-("CLOUD", 2, 3),
-("WIND", 3, 1),
-("STORM", 4, 5),
-("DRIP", 5, 8),
-("DROP", 6, 4),
-("COOL", 7, 6),
-("BREEZE", 8, 1),
-],
+            words.append((word, 1, 1))
 
-# 13 Creatures
-[
-("BUNNY", 1, 2),
-("CAT", 2, 6),
-("DOG", 3, 1),
-("MOUSE", 4, 3),
-("FROG", 5, 5),
-("BIRD", 6, 2),
-("SNAIL", 7, 4),
-("DEER", 8, 1),
-],
+        if len(words) > ROWS:
+            print(f"Row {excel_row_num} has more than {ROWS} words. Extra words will be ignored.")
+            words = words[:ROWS]
 
-# 14 Birds
-[
-("ROBIN", 1, 3),
-("HAWK", 2, 1),
-("CROW", 3, 2),
-("DOVE", 4, 5),
-("FINCH", 5, 4),
-("JAY", 6, 7),
-("BIRD", 7, 2),
-("SONG", 8, 6),
-],
+        if words:
+            puzzle_titles.append(title)
+            puzzles.append(words)
 
-# 15 Insects
-[
-("BEE", 1, 2),
-("ANT", 2, 3),
-("BUG", 3, 1),
-("FLY", 4, 5),
-("MOTH", 5, 2),
-("WASP", 6, 6),
-("BEETLE", 7, 1),
-("STING", 8, 4),
-],
+    return puzzle_titles, puzzles
 
-# 16 Butterflies
-[
-("SPRING", 1, 2),
-("WING", 2, 4),
-("COLOR", 3, 1),
-("FLY", 4, 5),
-("BEAUTY", 5, 2),
-("FLOWER", 6, 3),
-("LIGHT", 7, 6),
-("SOFT", 8, 1),
-],
-
-# 17 Spring
-[
-("SPRING", 1, 3),
-("BLOOM", 2, 6),
-("GREEN", 3, 1),
-("RAIN", 4, 5),
-("BUD", 5, 8),
-("GROW", 6, 2),
-("WARM", 7, 4),
-("PLANT", 8, 7),
-],
-
-# 18 Summer
-[
-("SUMMER", 1, 2),
-("SUN", 2, 5),
-("HEAT", 3, 1),
-("GROW", 4, 6),
-("WARM", 5, 3),
-("WATER", 6, 4),
-("GREEN", 7, 2),
-("BRIGHT", 8, 1),
-],
-
-# 19 Autumn
-[
-("FALL", 1, 3),
-("LEAF", 2, 1),
-("BROWN", 3, 2),
-("COOL", 4, 5),
-("BARE", 5, 4),
-("WIND", 6, 6),
-("AUTUMN", 7, 2),
-("DROP", 8, 1),
-],
-
-# 20 Colors
-[
-("RED", 1, 2),
-("BLUE", 2, 3),
-("YELLOW", 3, 1),
-("GREEN", 4, 5),
-("PURPLE", 5, 2),
-("WHITE", 6, 4),
-("ORANGE", 7, 1),
-("PINK", 8, 6),
-],
-
-]
-
-
-# -----------------------------
-# GRID BUILDER
-# -----------------------------
 def build_grid(words):
     grid = [["" for _ in range(COLS)] for _ in range(ROWS)]
 
-    for word, r, c in words:
-        r -= 1
-        c -= 1
+    shuffled_rows = list(range(ROWS))
+    random.shuffle(shuffled_rows)
+
+    placed_words = []
+
+    for index, (word, _, _) in enumerate(words):
+        r = shuffled_rows[index]
+        max_start = COLS - len(word)
+        c = random.randint(0, max_start)
 
         for i, ch in enumerate(word):
             grid[r][c + i] = ch
+
+        placed_words.append((word, r + 1, c + 1))
 
     for r in range(ROWS):
         for c in range(COLS):
             if grid[r][c] == "":
                 grid[r][c] = random.choice(string.ascii_uppercase)
 
-    return grid
+    return grid, placed_words
 
+def get_answer_positions(words):
+    positions = set()
+    for word, r, c in words:
+        r -= 1
+        c -= 1
+        for i in range(len(word)):
+            if 0 <= r < ROWS and 0 <= c + i < COLS:
+                positions.add((r, c + i))
+    return positions
 
-# -----------------------------
-# STYLE CELL (CENTER + FONT)
-# -----------------------------
-def style_cell(cell):
+def remove_table_borders(table):
+    tbl = table._tbl
+    tblPr = tbl.tblPr
+
+    borders = OxmlElement("w:tblBorders")
+    for edge in ["top", "left", "bottom", "right", "insideH", "insideV"]:
+        elem = OxmlElement(f"w:{edge}")
+        elem.set(qn("w:val"), "nil")
+        borders.append(elem)
+
+    tblPr.append(borders)
+
+def style_grid_cell(cell):
     for paragraph in cell.paragraphs:
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = paragraph.runs
-        if run:
-            for r in run:
-                r.font.size = Pt(12)
+        paragraph.paragraph_format.space_before = Pt(0)
+        paragraph.paragraph_format.space_after = Pt(0)
+        for run in paragraph.runs:
+            run.font.size = Pt(GRID_FONT_SIZE)
+            run.font.name = "Arial"
 
+def style_word_cell(cell):
+    for paragraph in cell.paragraphs:
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        paragraph.paragraph_format.space_before = Pt(0)
+        paragraph.paragraph_format.space_after = Pt(0)
+        for run in paragraph.runs:
+            run.font.size = Pt(WORD_FONT_SIZE)
+            run.font.name = "Arial"
 
-# -----------------------------
-# MAKE CELL SQUARE + BORDER
-# -----------------------------
-def set_cell_border(cell):
-    tc = cell._tc
-    tcPr = tc.get_or_add_tcPr()
+def add_title(doc, title_text):
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(0)
+    p.paragraph_format.space_after = Pt(0)
 
-    tcBorders = OxmlElement('w:tcBorders')
+    run = p.add_run(f'"{title_text}"')
+    run.bold = True
+    run.font.size = Pt(TITLE_FONT_SIZE)
+    run.font.name = "Arial Rounded MT Bold"
 
-    for edge in ['top', 'left', 'bottom', 'right']:
-        tag = OxmlElement(f'w:{edge}')
-        tag.set(qn('w:val'), 'single')
-        tag.set(qn('w:sz'), '8')   # thickness
-        tag.set(qn('w:space'), '0')
-        tag.set(qn('w:color'), '000000')
-        tcBorders.append(tag)
+def add_spacer(doc, points_after):
+    p = doc.add_paragraph()
+    p.paragraph_format.space_before = Pt(0)
+    p.paragraph_format.space_after = Pt(points_after)
 
-    tcPr.append(tcBorders)
+def setup_footer():
+    section = doc.sections[0]
+    footer = section.footer
+    paragraph = footer.paragraphs[0]
 
+    p = paragraph._element
+    for child in list(p):
+        p.remove(child)
 
-# -----------------------------
-# BUILD WORD DOC
-# -----------------------------
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
+    paragraph.paragraph_format.left_indent = Inches(1)
+    paragraph.paragraph_format.right_indent = Inches(0.2)
+
+    tab_stops = paragraph.paragraph_format.tab_stops
+    tab_stops.add_tab_stop(Inches(5.0), WD_TAB_ALIGNMENT.CENTER, WD_TAB_LEADER.SPACES)
+    tab_stops.add_tab_stop(Inches(9.6), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.SPACES)
+
+    left_run = paragraph.add_run('"Dementia Friendly Wordsearch"')
+    left_run.font.name = "Arial"
+    left_run.font.size = Pt(10)
+
+    paragraph.add_run("\t")
+
+    page_run = paragraph.add_run()
+    page_run.font.name = "Arial"
+    page_run.font.size = Pt(10)
+
+    fld_char_begin = OxmlElement("w:fldChar")
+    fld_char_begin.set(qn("w:fldCharType"), "begin")
+
+    instr_text = OxmlElement("w:instrText")
+    instr_text.set(qn("xml:space"), "preserve")
+    instr_text.text = "PAGE"
+
+    fld_char_end = OxmlElement("w:fldChar")
+    fld_char_end.set(qn("w:fldCharType"), "end")
+
+    page_run._r.append(fld_char_begin)
+    page_run._r.append(instr_text)
+    page_run._r.append(fld_char_end)
+
+    paragraph.add_run("\t")
+
+    right_run = paragraph.add_run('"Puzzles by Riley"')
+    right_run.font.name = "Arial"
+    right_run.font.size = Pt(10)
+
 desktop = os.path.join(os.path.expanduser("~"), "OneDrive", "Desktop")
 folder = os.path.join(desktop, "wordsearch_booklet")
 os.makedirs(folder, exist_ok=True)
 
+PUZZLE_TITLES, PUZZLES = load_puzzles_from_excel(EXCEL_PATH)
+
 doc = Document()
 
+section = doc.sections[0]
+section.orientation = WD_ORIENT.LANDSCAPE
+section.page_width, section.page_height = section.page_height, section.page_width
+section.left_margin = Inches(LEFT_MARGIN)
+section.right_margin = Inches(RIGHT_MARGIN)
+section.top_margin = Inches(TOP_MARGIN)
+section.bottom_margin = Inches(BOTTOM_MARGIN)
+
+setup_footer()
+
+answer_keys = []
+
 for i, puzzle in enumerate(PUZZLES, start=1):
+    title = PUZZLE_TITLES[i - 1]
 
-    doc.add_heading(f"Puzzle {i}", level=1)
+    grid, placed_words = build_grid(puzzle)
+    answer_keys.append((title, grid, get_answer_positions(placed_words)))
 
-    grid = build_grid(puzzle)
+    add_spacer(doc, 2)
+    add_title(doc, title)
+    add_spacer(doc, 3)
 
     table = doc.add_table(rows=ROWS, cols=COLS)
-    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    remove_table_borders(table)
 
-    # make cells uniform-ish
     for row in table.rows:
+        row.height = Pt(GRID_ROW_HEIGHT)
+        row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
         for cell in row.cells:
-            cell.width = Pt(25)
+            cell.width = Pt(GRID_CELL_WIDTH)
 
     for r in range(ROWS):
         for c in range(COLS):
             cell = table.cell(r, c)
             cell.text = grid[r][c]
-            style_cell(cell)
-            set_cell_border(cell)
+            style_grid_cell(cell)
 
+    add_spacer(doc, 3)
+
+    words_only = [word for word, _, _ in puzzle]
+    word_bank = doc.add_table(rows=2, cols=4)
+    word_bank.alignment = WD_TABLE_ALIGNMENT.CENTER
+    remove_table_borders(word_bank)
+
+    for row in word_bank.rows:
+        row.height = Pt(WORD_BANK_ROW_HEIGHT)
+        row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+        for cell in row.cells:
+            cell.width = Pt(WORD_BANK_COL_WIDTH)
+
+    index = 0
+    for r in range(2):
+        for c in range(4):
+            cell = word_bank.cell(r, c)
+            if index < len(words_only):
+                cell.text = words_only[index]
+                style_word_cell(cell)
+            index += 1
+
+    if i < len(PUZZLES):
+        doc.add_page_break()
+
+if len(answer_keys) > 0:
     doc.add_page_break()
 
+for start in range(0, len(answer_keys), 4):
+    if start > 0:
+        doc.add_page_break()
 
-file_path = os.path.join(folder, "wordsearch_booklet.docx")
-doc.save(file_path)
+    block = answer_keys[start:start + 4]
+
+    answer_page = doc.add_table(rows=2, cols=2)
+    answer_page.alignment = WD_TABLE_ALIGNMENT.CENTER
+    remove_table_borders(answer_page)
+
+    for row in answer_page.rows:
+        row.height = Pt(ANSWER_BLOCK_HEIGHT)
+        row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+
+    slot = 0
+    for rr in range(2):
+        for cc in range(2):
+            outer_cell = answer_page.cell(rr, cc)
+
+            if slot < len(block):
+                title, grid, positions = block[slot]
+
+                top_space = outer_cell.paragraphs[0]
+                top_space.paragraph_format.space_before = Pt(0)
+                top_space.paragraph_format.space_after = Pt(10)
+
+                title_p = outer_cell.add_paragraph()
+                title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                title_p.paragraph_format.space_before = Pt(0)
+                title_p.paragraph_format.space_after = Pt(8)
+
+                title_run = title_p.add_run(f'Answer Key: "{title}"')
+                title_run.bold = True
+                title_run.font.size = Pt(ANSWER_TITLE_SIZE)
+                title_run.font.name = "Arial"
+
+                mini = outer_cell.add_table(rows=ROWS, cols=COLS)
+                mini.alignment = WD_TABLE_ALIGNMENT.CENTER
+                remove_table_borders(mini)
+
+                for row in mini.rows:
+                    row.height = Pt(ANSWER_CELL_SIZE)
+                    row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+                    for mini_cell in row.cells:
+                        mini_cell.width = Pt(ANSWER_CELL_SIZE)
+
+                for r in range(ROWS):
+                    for c in range(COLS):
+                        mini_cell = mini.cell(r, c)
+                        para = mini_cell.paragraphs[0]
+                        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        para.paragraph_format.space_before = Pt(0)
+                        para.paragraph_format.space_after = Pt(0)
+
+                        run = para.add_run(grid[r][c])
+                        run.font.size = Pt(ANSWER_GRID_FONT_SIZE)
+                        run.font.name = "Arial"
+
+                        if (r, c) in positions:
+                            run.font.color.rgb = RGBColor(255, 0, 0)
+
+            slot += 1
+
+base_name = "wordsearch_booklet"
+file_path = os.path.join(folder, f"{base_name}.docx")
+
+counter = 1
+while True:
+    try:
+        doc.save(file_path)
+        break
+    except PermissionError:
+        file_path = os.path.join(folder, f"{base_name}_{counter}.docx")
+        counter += 1
 
 print("Saved booklet to:")
 print(file_path)
