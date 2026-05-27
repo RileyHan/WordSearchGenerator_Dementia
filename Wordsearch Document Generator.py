@@ -1,6 +1,8 @@
 import random
 import string
 import os
+import tempfile
+import subprocess
 from openpyxl import load_workbook  # type: ignore
 from docx import Document  # type: ignore
 from docx.shared import Pt, Inches, RGBColor  # type: ignore
@@ -9,11 +11,20 @@ from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE  # type: igno
 from docx.enum.section import WD_ORIENT  # type: ignore
 from docx.oxml import OxmlElement  # type: ignore
 from docx.oxml.ns import qn  # type: ignore
+from docxcompose.composer import Composer  # type: ignore
 
 ROWS = 8
 COLS = 12
 
-EXCEL_PATH = r"C:\Users\riley\OneDrive\Desktop\wordsearch_booklet\Book2.xlsx"
+desktop = os.path.join(os.path.expanduser("~"), "OneDrive", "Desktop")
+if not os.path.exists(desktop):
+    desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+
+EXCEL_PATH = os.path.join(desktop, "wordsearch_booklet", "Book2.xlsx")
+
+PUZZLES_FOLDER = os.path.join(desktop, "Puzzles")
+ANSWER_KEY_FOLDER = os.path.join(desktop, "Answer Key")
+OUTPUT_FOLDER = desktop
 
 TITLE_FONT_SIZE = 26
 GRID_FONT_SIZE = 36
@@ -34,9 +45,10 @@ ANSWER_GRID_FONT_SIZE = 14
 ANSWER_CELL_SIZE = 23
 ANSWER_BLOCK_HEIGHT = 235
 
+
 def load_puzzles_from_excel(file_path):
     wb = load_workbook(file_path, data_only=True)
-    ws = wb.worksheets[0]  # sheet 1 only
+    ws = wb.worksheets[0]
 
     puzzle_titles = []
     puzzles = []
@@ -74,6 +86,7 @@ def load_puzzles_from_excel(file_path):
 
     return puzzle_titles, puzzles
 
+
 def build_grid(words):
     grid = [["" for _ in range(COLS)] for _ in range(ROWS)]
 
@@ -99,6 +112,7 @@ def build_grid(words):
 
     return grid, placed_words
 
+
 def get_answer_positions(words):
     positions = set()
     for word, r, c in words:
@@ -108,6 +122,7 @@ def get_answer_positions(words):
             if 0 <= r < ROWS and 0 <= c + i < COLS:
                 positions.add((r, c + i))
     return positions
+
 
 def remove_table_borders(table):
     tbl = table._tbl
@@ -121,6 +136,7 @@ def remove_table_borders(table):
 
     tblPr.append(borders)
 
+
 def style_grid_cell(cell):
     for paragraph in cell.paragraphs:
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -130,6 +146,7 @@ def style_grid_cell(cell):
             run.font.size = Pt(GRID_FONT_SIZE)
             run.font.name = "Arial"
 
+
 def style_word_cell(cell):
     for paragraph in cell.paragraphs:
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -138,6 +155,7 @@ def style_word_cell(cell):
         for run in paragraph.runs:
             run.font.size = Pt(WORD_FONT_SIZE)
             run.font.name = "Arial"
+
 
 def add_title(doc, title_text):
     p = doc.add_paragraph()
@@ -150,12 +168,14 @@ def add_title(doc, title_text):
     run.font.size = Pt(TITLE_FONT_SIZE)
     run.font.name = "Arial Rounded MT Bold"
 
+
 def add_spacer(doc, points_after):
     p = doc.add_paragraph()
     p.paragraph_format.space_before = Pt(0)
     p.paragraph_format.space_after = Pt(points_after)
 
-def setup_footer():
+
+def setup_footer(doc):
     section = doc.sections[0]
     footer = section.footer
     paragraph = footer.paragraphs[0]
@@ -204,154 +224,274 @@ def setup_footer():
     right_run.font.name = "Arial"
     right_run.font.size = Pt(10)
 
-desktop = os.path.join(os.path.expanduser("~"), "OneDrive", "Desktop")
-folder = os.path.join(desktop, "wordsearch_booklet")
-os.makedirs(folder, exist_ok=True)
 
-PUZZLE_TITLES, PUZZLES = load_puzzles_from_excel(EXCEL_PATH)
+def setup_document(doc):
+    section = doc.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width, section.page_height = section.page_height, section.page_width
+    section.left_margin = Inches(LEFT_MARGIN)
+    section.right_margin = Inches(RIGHT_MARGIN)
+    section.top_margin = Inches(TOP_MARGIN)
+    section.bottom_margin = Inches(BOTTOM_MARGIN)
+    setup_footer(doc)
 
-doc = Document()
 
-section = doc.sections[0]
-section.orientation = WD_ORIENT.LANDSCAPE
-section.page_width, section.page_height = section.page_height, section.page_width
-section.left_margin = Inches(LEFT_MARGIN)
-section.right_margin = Inches(RIGHT_MARGIN)
-section.top_margin = Inches(TOP_MARGIN)
-section.bottom_margin = Inches(BOTTOM_MARGIN)
+def generate_puzzles_and_answers(puzzle_titles, puzzles):
+    puzzles_doc = Document()
+    setup_document(puzzles_doc)
 
-setup_footer()
+    answers_doc = Document()
+    setup_document(answers_doc)
 
-answer_keys = []
+    answer_keys = []
 
-for i, puzzle in enumerate(PUZZLES, start=1):
-    title = PUZZLE_TITLES[i - 1]
+    for i, puzzle in enumerate(puzzles, start=1):
+        title = puzzle_titles[i - 1]
 
-    grid, placed_words = build_grid(puzzle)
-    answer_keys.append((title, grid, get_answer_positions(placed_words)))
+        grid, placed_words = build_grid(puzzle)
+        answer_keys.append((title, grid, get_answer_positions(placed_words)))
 
-    add_spacer(doc, 2)
-    add_title(doc, title)
-    add_spacer(doc, 3)
+        add_spacer(puzzles_doc, 2)
+        add_title(puzzles_doc, title)
+        add_spacer(puzzles_doc, 3)
 
-    table = doc.add_table(rows=ROWS, cols=COLS)
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    remove_table_borders(table)
+        table = puzzles_doc.add_table(rows=ROWS, cols=COLS)
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        remove_table_borders(table)
 
-    for row in table.rows:
-        row.height = Pt(GRID_ROW_HEIGHT)
-        row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-        for cell in row.cells:
-            cell.width = Pt(GRID_CELL_WIDTH)
+        for row in table.rows:
+            row.height = Pt(GRID_ROW_HEIGHT)
+            row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+            for cell in row.cells:
+                cell.width = Pt(GRID_CELL_WIDTH)
 
-    for r in range(ROWS):
-        for c in range(COLS):
-            cell = table.cell(r, c)
-            cell.text = grid[r][c]
-            style_grid_cell(cell)
+        for r in range(ROWS):
+            for c in range(COLS):
+                cell = table.cell(r, c)
+                cell.text = grid[r][c]
+                style_grid_cell(cell)
 
-    add_spacer(doc, 3)
+        add_spacer(puzzles_doc, 3)
 
-    words_only = [word for word, _, _ in puzzle]
-    word_bank = doc.add_table(rows=2, cols=4)
-    word_bank.alignment = WD_TABLE_ALIGNMENT.CENTER
-    remove_table_borders(word_bank)
+        words_only = [word for word, _, _ in puzzle]
+        word_bank = puzzles_doc.add_table(rows=2, cols=4)
+        word_bank.alignment = WD_TABLE_ALIGNMENT.CENTER
+        remove_table_borders(word_bank)
 
-    for row in word_bank.rows:
-        row.height = Pt(WORD_BANK_ROW_HEIGHT)
-        row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-        for cell in row.cells:
-            cell.width = Pt(WORD_BANK_COL_WIDTH)
+        for row in word_bank.rows:
+            row.height = Pt(WORD_BANK_ROW_HEIGHT)
+            row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+            for cell in row.cells:
+                cell.width = Pt(WORD_BANK_COL_WIDTH)
 
-    index = 0
-    for r in range(2):
-        for c in range(4):
-            cell = word_bank.cell(r, c)
-            if index < len(words_only):
-                cell.text = words_only[index]
-                style_word_cell(cell)
-            index += 1
+        index = 0
+        for r in range(2):
+            for c in range(4):
+                cell = word_bank.cell(r, c)
+                if index < len(words_only):
+                    cell.text = words_only[index]
+                    style_word_cell(cell)
+                index += 1
 
-    if i < len(PUZZLES):
-        doc.add_page_break()
+        if i < len(puzzles):
+            puzzles_doc.add_page_break()
 
-if len(answer_keys) > 0:
-    doc.add_page_break()
+    for start in range(0, len(answer_keys), 4):
+        if start > 0:
+            answers_doc.add_page_break()
 
-for start in range(0, len(answer_keys), 4):
-    if start > 0:
-        doc.add_page_break()
+        block = answer_keys[start:start + 4]
 
-    block = answer_keys[start:start + 4]
+        answer_page = answers_doc.add_table(rows=2, cols=2)
+        answer_page.alignment = WD_TABLE_ALIGNMENT.CENTER
+        remove_table_borders(answer_page)
 
-    answer_page = doc.add_table(rows=2, cols=2)
-    answer_page.alignment = WD_TABLE_ALIGNMENT.CENTER
-    remove_table_borders(answer_page)
+        for row in answer_page.rows:
+            row.height = Pt(ANSWER_BLOCK_HEIGHT)
+            row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
 
-    for row in answer_page.rows:
-        row.height = Pt(ANSWER_BLOCK_HEIGHT)
-        row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+        slot = 0
+        for rr in range(2):
+            for cc in range(2):
+                outer_cell = answer_page.cell(rr, cc)
 
-    slot = 0
-    for rr in range(2):
-        for cc in range(2):
-            outer_cell = answer_page.cell(rr, cc)
+                if slot < len(block):
+                    title, grid, positions = block[slot]
 
-            if slot < len(block):
-                title, grid, positions = block[slot]
+                    top_space = outer_cell.paragraphs[0]
+                    top_space.paragraph_format.space_before = Pt(0)
+                    top_space.paragraph_format.space_after = Pt(10)
 
-                top_space = outer_cell.paragraphs[0]
-                top_space.paragraph_format.space_before = Pt(0)
-                top_space.paragraph_format.space_after = Pt(10)
+                    title_p = outer_cell.add_paragraph()
+                    title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    title_p.paragraph_format.space_before = Pt(0)
+                    title_p.paragraph_format.space_after = Pt(8)
 
-                title_p = outer_cell.add_paragraph()
-                title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                title_p.paragraph_format.space_before = Pt(0)
-                title_p.paragraph_format.space_after = Pt(8)
+                    title_run = title_p.add_run(f'Answer Key: "{title}"')
+                    title_run.bold = True
+                    title_run.font.size = Pt(ANSWER_TITLE_SIZE)
+                    title_run.font.name = "Arial"
 
-                title_run = title_p.add_run(f'Answer Key: "{title}"')
-                title_run.bold = True
-                title_run.font.size = Pt(ANSWER_TITLE_SIZE)
-                title_run.font.name = "Arial"
+                    mini = outer_cell.add_table(rows=ROWS, cols=COLS)
+                    mini.alignment = WD_TABLE_ALIGNMENT.CENTER
+                    remove_table_borders(mini)
 
-                mini = outer_cell.add_table(rows=ROWS, cols=COLS)
-                mini.alignment = WD_TABLE_ALIGNMENT.CENTER
-                remove_table_borders(mini)
+                    for row in mini.rows:
+                        row.height = Pt(ANSWER_CELL_SIZE)
+                        row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+                        for mini_cell in row.cells:
+                            mini_cell.width = Pt(ANSWER_CELL_SIZE)
 
-                for row in mini.rows:
-                    row.height = Pt(ANSWER_CELL_SIZE)
-                    row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-                    for mini_cell in row.cells:
-                        mini_cell.width = Pt(ANSWER_CELL_SIZE)
+                    for r in range(ROWS):
+                        for c in range(COLS):
+                            mini_cell = mini.cell(r, c)
+                            para = mini_cell.paragraphs[0]
+                            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            para.paragraph_format.space_before = Pt(0)
+                            para.paragraph_format.space_after = Pt(0)
 
-                for r in range(ROWS):
-                    for c in range(COLS):
-                        mini_cell = mini.cell(r, c)
-                        para = mini_cell.paragraphs[0]
-                        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        para.paragraph_format.space_before = Pt(0)
-                        para.paragraph_format.space_after = Pt(0)
+                            run = para.add_run(grid[r][c])
+                            run.font.size = Pt(ANSWER_GRID_FONT_SIZE)
+                            run.font.name = "Arial"
 
-                        run = para.add_run(grid[r][c])
-                        run.font.size = Pt(ANSWER_GRID_FONT_SIZE)
-                        run.font.name = "Arial"
+                            if (r, c) in positions:
+                                run.font.color.rgb = RGBColor(255, 0, 0)
 
-                        if (r, c) in positions:
-                            run.font.color.rgb = RGBColor(255, 0, 0)
+                slot += 1
 
-            slot += 1
+    return puzzles_doc, answers_doc
 
-base_name = "wordsearch_booklet"
-file_path = os.path.join(folder, f"{base_name}.docx")
 
-counter = 1
-while True:
-    try:
-        doc.save(file_path)
-        break
-    except PermissionError:
-        file_path = os.path.join(folder, f"{base_name}_{counter}.docx")
+def find_docx_file(folder, base_name):
+    exact = os.path.join(folder, f"{base_name}.docx")
+    if os.path.exists(exact):
+        return exact
+
+    for name in os.listdir(folder):
+        if name.lower() == f"{base_name.lower()}.docx":
+            return os.path.join(folder, name)
+
+    raise FileNotFoundError(f"Could not find: {base_name}.docx in {folder}")
+
+
+def merge_word_files_in_order(file_paths, output_path):
+    master = Document(file_paths[0])
+    composer = Composer(master)
+
+    for path in file_paths[1:]:
+        composer.append(Document(path))
+
+    composer.save(output_path)
+
+
+def save_document_safely(doc, file_path):
+    base, ext = os.path.splitext(file_path)
+    counter = 1
+
+    while True:
+        try:
+            doc.save(file_path)
+            return file_path
+        except PermissionError:
+            file_path = f"{base}_{counter}{ext}"
+            counter += 1
+
+
+def get_available_output_path(file_path):
+    base, ext = os.path.splitext(file_path)
+    candidate = file_path
+    counter = 1
+
+    while os.path.exists(candidate):
+        candidate = f"{base}_{counter}{ext}"
         counter += 1
 
-print("Saved booklet to:")
-print(file_path)
+    return candidate
+
+
+def open_folder(path):
+    try:
+        os.startfile(path)
+    except Exception:
+        try:
+            subprocess.Popen(["explorer", path])
+        except Exception:
+            pass
+
+
+def main():
+    try:
+        print("Starting wordsearch booklet generator...")
+        print(f"Using desktop folder: {desktop}")
+        print(f"Excel file: {EXCEL_PATH}")
+        print(f"Puzzles folder: {PUZZLES_FOLDER}")
+        print(f"Answer key folder: {ANSWER_KEY_FOLDER}")
+        print()
+
+        os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+        PUZZLE_TITLES, PUZZLES = load_puzzles_from_excel(EXCEL_PATH)
+
+        if not PUZZLES:
+            print("No puzzles were found in the Excel file.")
+            input("Press Enter to close...")
+            return
+
+        generated_puzzles_doc, generated_answers_doc = generate_puzzles_and_answers(PUZZLE_TITLES, PUZZLES)
+
+        temp_dir = tempfile.mkdtemp()
+
+        generated_puzzles_path = save_document_safely(
+            generated_puzzles_doc,
+            os.path.join(temp_dir, "generated_puzzles.docx")
+        )
+
+        generated_answers_path = save_document_safely(
+            generated_answers_doc,
+            os.path.join(temp_dir, "generated_answer_keys.docx")
+        )
+
+        puzzles_merge_order = [
+            find_docx_file(PUZZLES_FOLDER, "Puzzles Cover"),
+            find_docx_file(PUZZLES_FOLDER, "Puzzles Copyright"),
+            find_docx_file(PUZZLES_FOLDER, "Puzzles Instructions"),
+            generated_puzzles_path,
+            find_docx_file(PUZZLES_FOLDER, "Puzzles Back Cover"),
+        ]
+
+        answers_merge_order = [
+            find_docx_file(ANSWER_KEY_FOLDER, "Answer Key Cover"),
+            find_docx_file(ANSWER_KEY_FOLDER, "Answer Key Copyright"),
+            generated_answers_path,
+            find_docx_file(ANSWER_KEY_FOLDER, "Answer Key Back Cover"),
+        ]
+
+        final_puzzles_path = get_available_output_path(
+            os.path.join(OUTPUT_FOLDER, "wordsearch_puzzles_booklet.docx")
+        )
+
+        final_answers_path = get_available_output_path(
+            os.path.join(OUTPUT_FOLDER, "wordsearch_answer_key_booklet.docx")
+        )
+
+        merge_word_files_in_order(puzzles_merge_order, final_puzzles_path)
+        merge_word_files_in_order(answers_merge_order, final_answers_path)
+
+        print("Saved puzzles booklet to:")
+        print(final_puzzles_path)
+        print()
+        print("Saved answer key booklet to:")
+        print(final_answers_path)
+        print()
+        print("Opening output folder...")
+        open_folder(OUTPUT_FOLDER)
+
+    except Exception as e:
+        print("An error occurred:")
+        print(str(e))
+
+    input("Press Enter to close...")
+
+
+if __name__ == "__main__":
+    main()
