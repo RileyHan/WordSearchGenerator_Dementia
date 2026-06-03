@@ -1,49 +1,80 @@
 import random
 import string
 import os
-import tempfile
 import subprocess
+from copy import deepcopy
 from openpyxl import load_workbook  # type: ignore
 from docx import Document  # type: ignore
 from docx.shared import Pt, Inches, RGBColor  # type: ignore
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT, WD_TAB_LEADER  # type: ignore
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE  # type: ignore
-from docx.enum.section import WD_ORIENT  # type: ignore
+from docx.enum.section import WD_ORIENT, WD_SECTION  # type: ignore
 from docx.oxml import OxmlElement  # type: ignore
 from docx.oxml.ns import qn  # type: ignore
-from docxcompose.composer import Composer  # type: ignore
 
 ROWS = 8
 COLS = 12
 
-desktop = os.path.join(os.path.expanduser("~"), "OneDrive", "Desktop")
-if not os.path.exists(desktop):
-    desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+BASE_FOLDER = r"C:\Users\riley\OneDrive\Desktop\wordsearch_booklet"
 
-EXCEL_PATH = os.path.join(desktop, "wordsearch_booklet", "Book2.xlsx")
-
-PUZZLES_FOLDER = os.path.join(desktop, "Puzzles")
-ANSWER_KEY_FOLDER = os.path.join(desktop, "Answer Key")
-OUTPUT_FOLDER = desktop
+EXCEL_PATH = os.path.join(BASE_FOLDER, "Book2.xlsx")
+PUZZLES_FOLDER = os.path.join(BASE_FOLDER, "Puzzles")
+ANSWER_KEY_FOLDER = os.path.join(BASE_FOLDER, "Answer Key")
+OUTPUT_FOLDER = BASE_FOLDER
 
 TITLE_FONT_SIZE = 26
-GRID_FONT_SIZE = 36
-WORD_FONT_SIZE = 20
+GRID_FONT_SIZE = 28
+WORD_FONT_SIZE = 18
 
-GRID_CELL_WIDTH = 56
-GRID_ROW_HEIGHT = 48
-WORD_BANK_ROW_HEIGHT = 20
-WORD_BANK_COL_WIDTH = 150
+GRID_CELL_WIDTH = 58
+GRID_ROW_HEIGHT = 42
+WORD_BANK_ROW_HEIGHT = 24
+WORD_BANK_COL_WIDTH = 155
 
-TOP_MARGIN = 0.2
-BOTTOM_MARGIN = 0.2
-LEFT_MARGIN = 0.25
-RIGHT_MARGIN = 0.25
+LANDSCAPE_TOP_MARGIN = 0.25
+LANDSCAPE_BOTTOM_MARGIN = 0.25
+LANDSCAPE_LEFT_MARGIN = 0.25
+LANDSCAPE_RIGHT_MARGIN = 0.25
+
+PORTRAIT_TOP_MARGIN = 0.75
+PORTRAIT_BOTTOM_MARGIN = 0.75
+PORTRAIT_LEFT_MARGIN = 0.75
+PORTRAIT_RIGHT_MARGIN = 0.75
 
 ANSWER_TITLE_SIZE = 16
 ANSWER_GRID_FONT_SIZE = 14
-ANSWER_CELL_SIZE = 23
-ANSWER_BLOCK_HEIGHT = 235
+ANSWER_CELL_SIZE = 24
+ANSWER_BLOCK_HEIGHT = 255
+
+
+def verify_required_paths():
+    required_folders = [
+        PUZZLES_FOLDER,
+        ANSWER_KEY_FOLDER,
+    ]
+
+    required_files = [
+        EXCEL_PATH,
+        os.path.join(PUZZLES_FOLDER, "Puzzles Cover.docx"),
+        os.path.join(PUZZLES_FOLDER, "Puzzles Copyright.docx"),
+        os.path.join(PUZZLES_FOLDER, "Puzzles Instructions.docx"),
+        os.path.join(PUZZLES_FOLDER, "Puzzles Back Cover.docx"),
+        os.path.join(ANSWER_KEY_FOLDER, "Answer Key Cover.docx"),
+        os.path.join(ANSWER_KEY_FOLDER, "Answer Key Copyright.docx"),
+        os.path.join(ANSWER_KEY_FOLDER, "Answer Key Back Cover.docx"),
+    ]
+
+    print("Checking required folders...")
+    for folder in required_folders:
+        print(f"  {folder}")
+        if not os.path.isdir(folder):
+            raise FileNotFoundError(f"Missing folder: {folder}")
+
+    print("Checking required files...")
+    for file_path in required_files:
+        print(f"  {file_path}")
+        if not os.path.isfile(file_path):
+            raise FileNotFoundError(f"Missing file: {file_path}")
 
 
 def load_puzzles_from_excel(file_path):
@@ -160,8 +191,8 @@ def style_word_cell(cell):
 def add_title(doc, title_text):
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.paragraph_format.space_before = Pt(0)
-    p.paragraph_format.space_after = Pt(0)
+    p.paragraph_format.space_before = Pt(8)
+    p.paragraph_format.space_after = Pt(12)
 
     run = p.add_run(f'"{title_text}"')
     run.bold = True
@@ -175,26 +206,29 @@ def add_spacer(doc, points_after):
     p.paragraph_format.space_after = Pt(points_after)
 
 
-def setup_footer(doc):
-    section = doc.sections[0]
-    footer = section.footer
-    paragraph = footer.paragraphs[0]
-
+def clear_footer(paragraph):
     p = paragraph._element
     for child in list(p):
         p.remove(child)
 
+
+def setup_footer_for_section(section, left_text, right_text):
+    footer = section.footer
+    paragraph = footer.paragraphs[0]
+
+    clear_footer(paragraph)
+
     paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
     paragraph.paragraph_format.space_before = Pt(0)
     paragraph.paragraph_format.space_after = Pt(0)
-    paragraph.paragraph_format.left_indent = Inches(1)
-    paragraph.paragraph_format.right_indent = Inches(0.2)
+    paragraph.paragraph_format.left_indent = Inches(0.3)
+    paragraph.paragraph_format.right_indent = Inches(0.3)
 
     tab_stops = paragraph.paragraph_format.tab_stops
-    tab_stops.add_tab_stop(Inches(5.0), WD_TAB_ALIGNMENT.CENTER, WD_TAB_LEADER.SPACES)
-    tab_stops.add_tab_stop(Inches(9.6), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.SPACES)
+    tab_stops.add_tab_stop(Inches(5.5), WD_TAB_ALIGNMENT.CENTER, WD_TAB_LEADER.SPACES)
+    tab_stops.add_tab_stop(Inches(10.2), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.SPACES)
 
-    left_run = paragraph.add_run('"Dementia Friendly Wordsearch"')
+    left_run = paragraph.add_run(left_text)
     left_run.font.name = "Arial"
     left_run.font.size = Pt(10)
 
@@ -211,51 +245,101 @@ def setup_footer(doc):
     instr_text.set(qn("xml:space"), "preserve")
     instr_text.text = "PAGE"
 
+    fld_char_sep = OxmlElement("w:fldChar")
+    fld_char_sep.set(qn("w:fldCharType"), "separate")
+
     fld_char_end = OxmlElement("w:fldChar")
     fld_char_end.set(qn("w:fldCharType"), "end")
 
     page_run._r.append(fld_char_begin)
     page_run._r.append(instr_text)
+    page_run._r.append(fld_char_sep)
     page_run._r.append(fld_char_end)
 
     paragraph.add_run("\t")
 
-    right_run = paragraph.add_run('"Puzzles by Riley"')
+    right_run = paragraph.add_run(right_text)
     right_run.font.name = "Arial"
     right_run.font.size = Pt(10)
 
 
-def setup_document(doc):
-    section = doc.sections[0]
+def set_section_landscape(section, footer_left, footer_right):
     section.orientation = WD_ORIENT.LANDSCAPE
-    section.page_width, section.page_height = section.page_height, section.page_width
-    section.left_margin = Inches(LEFT_MARGIN)
-    section.right_margin = Inches(RIGHT_MARGIN)
-    section.top_margin = Inches(TOP_MARGIN)
-    section.bottom_margin = Inches(BOTTOM_MARGIN)
-    setup_footer(doc)
+    section.page_width = Inches(11)
+    section.page_height = Inches(8.5)
+    section.left_margin = Inches(LANDSCAPE_LEFT_MARGIN)
+    section.right_margin = Inches(LANDSCAPE_RIGHT_MARGIN)
+    section.top_margin = Inches(LANDSCAPE_TOP_MARGIN)
+    section.bottom_margin = Inches(LANDSCAPE_BOTTOM_MARGIN)
+    setup_footer_for_section(section, footer_left, footer_right)
 
 
-def generate_puzzles_and_answers(puzzle_titles, puzzles):
-    puzzles_doc = Document()
-    setup_document(puzzles_doc)
+def set_section_portrait(section, footer_left="", footer_right=""):
+    section.orientation = WD_ORIENT.PORTRAIT
+    section.page_width = Inches(8.5)
+    section.page_height = Inches(11)
+    section.left_margin = Inches(PORTRAIT_LEFT_MARGIN)
+    section.right_margin = Inches(PORTRAIT_RIGHT_MARGIN)
+    section.top_margin = Inches(PORTRAIT_TOP_MARGIN)
+    section.bottom_margin = Inches(PORTRAIT_BOTTOM_MARGIN)
+    if footer_left or footer_right:
+        setup_footer_for_section(section, footer_left, footer_right)
 
-    answers_doc = Document()
-    setup_document(answers_doc)
 
-    answer_keys = []
+def append_doc_contents(target_doc, source_path):
+    src = Document(source_path)
+
+    body = target_doc._element.body
+    src_body = src._element.body
+
+    for child in src_body:
+        if child.tag.endswith("sectPr"):
+            continue
+        body.append(deepcopy(child))
+
+
+def append_external_doc_as_own_page(target_doc, source_path):
+    if len(target_doc._element.body) > 0:
+        target_doc.add_section(WD_SECTION.NEW_PAGE)
+
+    section = target_doc.sections[-1]
+    set_section_portrait(section)
+
+    append_doc_contents(target_doc, source_path)
+
+
+def start_new_landscape_section(doc, footer_left, footer_right):
+    if len(doc._element.body) > 0:
+        doc.add_section(WD_SECTION.NEW_PAGE)
+    section = doc.sections[-1]
+    set_section_landscape(section, footer_left, footer_right)
+    return section
+
+
+def build_generated_puzzles_section(doc, puzzle_titles, puzzles):
+    start_new_landscape_section(
+        doc,
+        '"Dementia Friendly Wordsearch"',
+        '"Puzzles by Riley"'
+    )
 
     for i, puzzle in enumerate(puzzles, start=1):
+        if i > 1:
+            doc.add_section(WD_SECTION.NEW_PAGE)
+            set_section_landscape(
+                doc.sections[-1],
+                '"Dementia Friendly Wordsearch"',
+                '"Puzzles by Riley"'
+            )
+
         title = puzzle_titles[i - 1]
+        grid, _placed_words = build_grid(puzzle)
 
-        grid, placed_words = build_grid(puzzle)
-        answer_keys.append((title, grid, get_answer_positions(placed_words)))
+        add_spacer(doc, 6)
+        add_title(doc, title)
+        add_spacer(doc, 8)
 
-        add_spacer(puzzles_doc, 2)
-        add_title(puzzles_doc, title)
-        add_spacer(puzzles_doc, 3)
-
-        table = puzzles_doc.add_table(rows=ROWS, cols=COLS)
+        table = doc.add_table(rows=ROWS, cols=COLS)
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
         remove_table_borders(table)
 
@@ -271,10 +355,10 @@ def generate_puzzles_and_answers(puzzle_titles, puzzles):
                 cell.text = grid[r][c]
                 style_grid_cell(cell)
 
-        add_spacer(puzzles_doc, 3)
+        add_spacer(doc, 10)
 
         words_only = [word for word, _, _ in puzzle]
-        word_bank = puzzles_doc.add_table(rows=2, cols=4)
+        word_bank = doc.add_table(rows=2, cols=4)
         word_bank.alignment = WD_TABLE_ALIGNMENT.CENTER
         remove_table_borders(word_bank)
 
@@ -293,16 +377,36 @@ def generate_puzzles_and_answers(puzzle_titles, puzzles):
                     style_word_cell(cell)
                 index += 1
 
-        if i < len(puzzles):
-            puzzles_doc.add_page_break()
 
+def build_generated_answers_section(doc, puzzle_titles, puzzles):
+    answer_keys = []
+    for i, puzzle in enumerate(puzzles):
+        title = puzzle_titles[i]
+        grid, placed_words = build_grid(puzzle)
+        answer_keys.append((title, grid, get_answer_positions(placed_words)))
+
+    start_new_landscape_section(
+        doc,
+        '"Dementia Friendly Wordsearch - Answer Key"',
+        '"Puzzles by Riley"'
+    )
+
+    first_page = True
     for start in range(0, len(answer_keys), 4):
-        if start > 0:
-            answers_doc.add_page_break()
+        if not first_page:
+            doc.add_section(WD_SECTION.NEW_PAGE)
+            set_section_landscape(
+                doc.sections[-1],
+                '"Dementia Friendly Wordsearch - Answer Key"',
+                '"Puzzles by Riley"'
+            )
+        first_page = False
 
         block = answer_keys[start:start + 4]
 
-        answer_page = answers_doc.add_table(rows=2, cols=2)
+        add_spacer(doc, 4)
+
+        answer_page = doc.add_table(rows=2, cols=2)
         answer_page.alignment = WD_TABLE_ALIGNMENT.CENTER
         remove_table_borders(answer_page)
 
@@ -320,7 +424,7 @@ def generate_puzzles_and_answers(puzzle_titles, puzzles):
 
                     top_space = outer_cell.paragraphs[0]
                     top_space.paragraph_format.space_before = Pt(0)
-                    top_space.paragraph_format.space_after = Pt(10)
+                    top_space.paragraph_format.space_after = Pt(8)
 
                     title_p = outer_cell.add_paragraph()
                     title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -359,30 +463,6 @@ def generate_puzzles_and_answers(puzzle_titles, puzzles):
 
                 slot += 1
 
-    return puzzles_doc, answers_doc
-
-
-def find_docx_file(folder, base_name):
-    exact = os.path.join(folder, f"{base_name}.docx")
-    if os.path.exists(exact):
-        return exact
-
-    for name in os.listdir(folder):
-        if name.lower() == f"{base_name.lower()}.docx":
-            return os.path.join(folder, name)
-
-    raise FileNotFoundError(f"Could not find: {base_name}.docx in {folder}")
-
-
-def merge_word_files_in_order(file_paths, output_path):
-    master = Document(file_paths[0])
-    composer = Composer(master)
-
-    for path in file_paths[1:]:
-        composer.append(Document(path))
-
-    composer.save(output_path)
-
 
 def save_document_safely(doc, file_path):
     base, ext = os.path.splitext(file_path)
@@ -419,52 +499,55 @@ def open_folder(path):
             pass
 
 
+def build_puzzles_book(puzzle_titles, puzzles):
+    doc = Document()
+    set_section_portrait(doc.sections[0])
+
+    append_external_doc_as_own_page(doc, os.path.join(PUZZLES_FOLDER, "Puzzles Cover.docx"))
+    append_external_doc_as_own_page(doc, os.path.join(PUZZLES_FOLDER, "Puzzles Copyright.docx"))
+    append_external_doc_as_own_page(doc, os.path.join(PUZZLES_FOLDER, "Puzzles Instructions.docx"))
+
+    build_generated_puzzles_section(doc, puzzle_titles, puzzles)
+
+    append_external_doc_as_own_page(doc, os.path.join(PUZZLES_FOLDER, "Puzzles Back Cover.docx"))
+    return doc
+
+
+def build_answers_book(puzzle_titles, puzzles):
+    doc = Document()
+    set_section_portrait(doc.sections[0])
+
+    append_external_doc_as_own_page(doc, os.path.join(ANSWER_KEY_FOLDER, "Answer Key Cover.docx"))
+    append_external_doc_as_own_page(doc, os.path.join(ANSWER_KEY_FOLDER, "Answer Key Copyright.docx"))
+
+    build_generated_answers_section(doc, puzzle_titles, puzzles)
+
+    append_external_doc_as_own_page(doc, os.path.join(ANSWER_KEY_FOLDER, "Answer Key Back Cover.docx"))
+    return doc
+
+
 def main():
     try:
         print("Starting wordsearch booklet generator...")
-        print(f"Using desktop folder: {desktop}")
+        print(f"Base folder: {BASE_FOLDER}")
         print(f"Excel file: {EXCEL_PATH}")
         print(f"Puzzles folder: {PUZZLES_FOLDER}")
         print(f"Answer key folder: {ANSWER_KEY_FOLDER}")
+        print(f"Output folder: {OUTPUT_FOLDER}")
         print()
 
+        verify_required_paths()
         os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-        PUZZLE_TITLES, PUZZLES = load_puzzles_from_excel(EXCEL_PATH)
+        puzzle_titles, puzzles = load_puzzles_from_excel(EXCEL_PATH)
 
-        if not PUZZLES:
+        if not puzzles:
             print("No puzzles were found in the Excel file.")
             input("Press Enter to close...")
             return
 
-        generated_puzzles_doc, generated_answers_doc = generate_puzzles_and_answers(PUZZLE_TITLES, PUZZLES)
-
-        temp_dir = tempfile.mkdtemp()
-
-        generated_puzzles_path = save_document_safely(
-            generated_puzzles_doc,
-            os.path.join(temp_dir, "generated_puzzles.docx")
-        )
-
-        generated_answers_path = save_document_safely(
-            generated_answers_doc,
-            os.path.join(temp_dir, "generated_answer_keys.docx")
-        )
-
-        puzzles_merge_order = [
-            find_docx_file(PUZZLES_FOLDER, "Puzzles Cover"),
-            find_docx_file(PUZZLES_FOLDER, "Puzzles Copyright"),
-            find_docx_file(PUZZLES_FOLDER, "Puzzles Instructions"),
-            generated_puzzles_path,
-            find_docx_file(PUZZLES_FOLDER, "Puzzles Back Cover"),
-        ]
-
-        answers_merge_order = [
-            find_docx_file(ANSWER_KEY_FOLDER, "Answer Key Cover"),
-            find_docx_file(ANSWER_KEY_FOLDER, "Answer Key Copyright"),
-            generated_answers_path,
-            find_docx_file(ANSWER_KEY_FOLDER, "Answer Key Back Cover"),
-        ]
+        puzzles_doc = build_puzzles_book(puzzle_titles, puzzles)
+        answers_doc = build_answers_book(puzzle_titles, puzzles)
 
         final_puzzles_path = get_available_output_path(
             os.path.join(OUTPUT_FOLDER, "wordsearch_puzzles_booklet.docx")
@@ -474,9 +557,10 @@ def main():
             os.path.join(OUTPUT_FOLDER, "wordsearch_answer_key_booklet.docx")
         )
 
-        merge_word_files_in_order(puzzles_merge_order, final_puzzles_path)
-        merge_word_files_in_order(answers_merge_order, final_answers_path)
+        save_document_safely(puzzles_doc, final_puzzles_path)
+        save_document_safely(answers_doc, final_answers_path)
 
+        print()
         print("Saved puzzles booklet to:")
         print(final_puzzles_path)
         print()
@@ -487,8 +571,22 @@ def main():
         open_folder(OUTPUT_FOLDER)
 
     except Exception as e:
+        print()
         print("An error occurred:")
         print(str(e))
+        print()
+        print("Expected files:")
+        print(EXCEL_PATH)
+        print(os.path.join(PUZZLES_FOLDER, "Puzzles Cover.docx"))
+        print(os.path.join(PUZZLES_FOLDER, "Puzzles Copyright.docx"))
+        print(os.path.join(PUZZLES_FOLDER, "Puzzles Instructions.docx"))
+        print(os.path.join(PUZZLES_FOLDER, "Puzzles Back Cover.docx"))
+        print(os.path.join(ANSWER_KEY_FOLDER, "Answer Key Cover.docx"))
+        print(os.path.join(ANSWER_KEY_FOLDER, "Answer Key Copyright.docx"))
+        print(os.path.join(ANSWER_KEY_FOLDER, "Answer Key Back Cover.docx"))
+        print()
+        print("Also make sure required packages are installed:")
+        print("pip install openpyxl python-docx")
 
     input("Press Enter to close...")
 
