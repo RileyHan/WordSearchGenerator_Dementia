@@ -23,7 +23,7 @@ ANSWER_KEY_FOLDER = os.path.join(BASE_FOLDER, "Answer Key")
 OUTPUT_FOLDER = BASE_FOLDER
 
 TITLE_FONT_SIZE = 26
-GRID_FONT_SIZE = 28
+GRID_FONT_SIZE = 36
 WORD_FONT_SIZE = 18
 
 GRID_CELL_WIDTH = 58
@@ -212,7 +212,39 @@ def clear_footer(paragraph):
         p.remove(child)
 
 
+def unlink_footer_from_previous(section):
+    section.footer.is_linked_to_previous = False
+
+
+def ensure_pgNumType(sectPr):
+    pg_num_type = sectPr.find(qn("w:pgNumType"))
+    if pg_num_type is None:
+        pg_num_type = OxmlElement("w:pgNumType")
+        sectPr.append(pg_num_type)
+    return pg_num_type
+
+
+def set_page_number_start(section, start_value):
+    sectPr = section._sectPr
+    pg_num_type = ensure_pgNumType(sectPr)
+    pg_num_type.set(qn("w:start"), str(start_value))
+
+
+def set_page_number_format(section, fmt):
+    sectPr = section._sectPr
+    pg_num_type = ensure_pgNumType(sectPr)
+    pg_num_type.set(qn("w:fmt"), fmt)
+
+
+def hide_footer_for_section(section):
+    unlink_footer_from_previous(section)
+    footer = section.footer
+    if footer.paragraphs:
+        clear_footer(footer.paragraphs[0])
+
+
 def setup_footer_for_section(section, left_text, right_text):
+    unlink_footer_from_previous(section)
     footer = section.footer
     paragraph = footer.paragraphs[0]
 
@@ -225,8 +257,8 @@ def setup_footer_for_section(section, left_text, right_text):
     paragraph.paragraph_format.right_indent = Inches(0.3)
 
     tab_stops = paragraph.paragraph_format.tab_stops
-    tab_stops.add_tab_stop(Inches(5.5), WD_TAB_ALIGNMENT.CENTER, WD_TAB_LEADER.SPACES)
-    tab_stops.add_tab_stop(Inches(10.2), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.SPACES)
+    tab_stops.add_tab_stop(Inches(3.75), WD_TAB_ALIGNMENT.CENTER, WD_TAB_LEADER.SPACES)
+    tab_stops.add_tab_stop(Inches(7.0), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.SPACES)
 
     left_run = paragraph.add_run(left_text)
     left_run.font.name = "Arial"
@@ -284,6 +316,8 @@ def set_section_portrait(section, footer_left="", footer_right=""):
     section.bottom_margin = Inches(PORTRAIT_BOTTOM_MARGIN)
     if footer_left or footer_right:
         setup_footer_for_section(section, footer_left, footer_right)
+    else:
+        hide_footer_for_section(section)
 
 
 def append_doc_contents(target_doc, source_path):
@@ -304,8 +338,8 @@ def append_external_doc_as_own_page(target_doc, source_path):
 
     section = target_doc.sections[-1]
     set_section_portrait(section)
-
     append_doc_contents(target_doc, source_path)
+    return section
 
 
 def start_new_landscape_section(doc, footer_left, footer_right):
@@ -317,17 +351,20 @@ def start_new_landscape_section(doc, footer_left, footer_right):
 
 
 def build_generated_puzzles_section(doc, puzzle_titles, puzzles):
-    start_new_landscape_section(
+    puzzle_section = start_new_landscape_section(
         doc,
         '"Dementia Friendly Wordsearch"',
         '"Puzzles by Riley"'
     )
+    set_page_number_format(puzzle_section, "decimal")
+    set_page_number_start(puzzle_section, 1)
 
     for i, puzzle in enumerate(puzzles, start=1):
         if i > 1:
             doc.add_section(WD_SECTION.NEW_PAGE)
+            next_section = doc.sections[-1]
             set_section_landscape(
-                doc.sections[-1],
+                next_section,
                 '"Dementia Friendly Wordsearch"',
                 '"Puzzles by Riley"'
             )
@@ -385,18 +422,21 @@ def build_generated_answers_section(doc, puzzle_titles, puzzles):
         grid, placed_words = build_grid(puzzle)
         answer_keys.append((title, grid, get_answer_positions(placed_words)))
 
-    start_new_landscape_section(
+    answer_section = start_new_landscape_section(
         doc,
         '"Dementia Friendly Wordsearch - Answer Key"',
         '"Puzzles by Riley"'
     )
+    set_page_number_format(answer_section, "decimal")
+    set_page_number_start(answer_section, 1)
 
     first_page = True
     for start in range(0, len(answer_keys), 4):
         if not first_page:
             doc.add_section(WD_SECTION.NEW_PAGE)
+            next_section = doc.sections[-1]
             set_section_landscape(
-                doc.sections[-1],
+                next_section,
                 '"Dementia Friendly Wordsearch - Answer Key"',
                 '"Puzzles by Riley"'
             )
@@ -501,28 +541,65 @@ def open_folder(path):
 
 def build_puzzles_book(puzzle_titles, puzzles):
     doc = Document()
-    set_section_portrait(doc.sections[0])
 
-    append_external_doc_as_own_page(doc, os.path.join(PUZZLES_FOLDER, "Puzzles Cover.docx"))
-    append_external_doc_as_own_page(doc, os.path.join(PUZZLES_FOLDER, "Puzzles Copyright.docx"))
-    append_external_doc_as_own_page(doc, os.path.join(PUZZLES_FOLDER, "Puzzles Instructions.docx"))
+    first_section = doc.sections[0]
+    set_section_portrait(first_section)
+    hide_footer_for_section(first_section)
+
+    cover_section = append_external_doc_as_own_page(
+        doc, os.path.join(PUZZLES_FOLDER, "Puzzles Cover.docx")
+    )
+    hide_footer_for_section(cover_section)
+
+    copyright_section = append_external_doc_as_own_page(
+        doc, os.path.join(PUZZLES_FOLDER, "Puzzles Copyright.docx")
+    )
+    set_section_portrait(copyright_section, '"Dementia Friendly Wordsearch"', '"Puzzles by Riley"')
+    set_page_number_format(copyright_section, "lowerRoman")
+    set_page_number_start(copyright_section, 1)
+
+    instructions_section = append_external_doc_as_own_page(
+        doc, os.path.join(PUZZLES_FOLDER, "Puzzles Instructions.docx")
+    )
+    set_section_portrait(instructions_section, '"Dementia Friendly Wordsearch"', '"Puzzles by Riley"')
+    set_page_number_format(instructions_section, "lowerRoman")
 
     build_generated_puzzles_section(doc, puzzle_titles, puzzles)
 
-    append_external_doc_as_own_page(doc, os.path.join(PUZZLES_FOLDER, "Puzzles Back Cover.docx"))
+    back_cover_section = append_external_doc_as_own_page(
+        doc, os.path.join(PUZZLES_FOLDER, "Puzzles Back Cover.docx")
+    )
+    hide_footer_for_section(back_cover_section)
+
     return doc
 
 
 def build_answers_book(puzzle_titles, puzzles):
     doc = Document()
-    set_section_portrait(doc.sections[0])
 
-    append_external_doc_as_own_page(doc, os.path.join(ANSWER_KEY_FOLDER, "Answer Key Cover.docx"))
-    append_external_doc_as_own_page(doc, os.path.join(ANSWER_KEY_FOLDER, "Answer Key Copyright.docx"))
+    first_section = doc.sections[0]
+    set_section_portrait(first_section)
+    hide_footer_for_section(first_section)
+
+    cover_section = append_external_doc_as_own_page(
+        doc, os.path.join(ANSWER_KEY_FOLDER, "Answer Key Cover.docx")
+    )
+    hide_footer_for_section(cover_section)
+
+    copyright_section = append_external_doc_as_own_page(
+        doc, os.path.join(ANSWER_KEY_FOLDER, "Answer Key Copyright.docx")
+    )
+    set_section_portrait(copyright_section, '"Dementia Friendly Wordsearch - Answer Key"', '"Puzzles by Riley"')
+    set_page_number_format(copyright_section, "lowerRoman")
+    set_page_number_start(copyright_section, 1)
 
     build_generated_answers_section(doc, puzzle_titles, puzzles)
 
-    append_external_doc_as_own_page(doc, os.path.join(ANSWER_KEY_FOLDER, "Answer Key Back Cover.docx"))
+    back_cover_section = append_external_doc_as_own_page(
+        doc, os.path.join(ANSWER_KEY_FOLDER, "Answer Key Back Cover.docx")
+    )
+    hide_footer_for_section(back_cover_section)
+
     return doc
 
 
