@@ -2,6 +2,7 @@ import random
 import string
 import os
 import subprocess
+from copy import deepcopy
 from openpyxl import load_workbook  # type: ignore
 from docx import Document  # type: ignore
 from docx.shared import Pt, Inches, RGBColor  # type: ignore
@@ -19,6 +20,13 @@ COLS = 12
 BASE_FOLDER = r"C:\Users\riley\OneDrive\Desktop\wordsearch_booklet"
 EXCEL_PATH = os.path.join(BASE_FOLDER, "Book2.xlsx")
 OUTPUT_FOLDER = BASE_FOLDER
+SCRIPT_FOLDER = os.path.dirname(os.path.abspath(__file__))
+
+# Front/back matter files
+COVER_PATH = os.path.join(SCRIPT_FOLDER, "Puzzles Cover.docx")
+COPYRIGHT_PATH = os.path.join(SCRIPT_FOLDER, "Puzzles Copyright.docx")
+INSTRUCTIONS_PATH = os.path.join(SCRIPT_FOLDER, "Puzzles Instructions.docx")
+BACK_COVER_PATH = os.path.join(SCRIPT_FOLDER, "Puzzles Back Cover.docx")
 
 # Font sizes for puzzle pages
 TITLE_FONT_SIZE = 26
@@ -48,7 +56,13 @@ def verify_required_paths():
     """
     Make sure the Excel file exists before trying to build anything.
     """
-    required_files = [EXCEL_PATH]
+    required_files = [
+        EXCEL_PATH,
+        COVER_PATH,
+        COPYRIGHT_PATH,
+        INSTRUCTIONS_PATH,
+        BACK_COVER_PATH,
+    ]
 
     print("Checking required files...")
     for file_path in required_files:
@@ -230,6 +244,58 @@ def add_spacer(doc, points_after):
     p.paragraph_format.space_after = Pt(points_after)
 
 
+def remove_paragraph(paragraph):
+    """
+    Remove a paragraph from the document.
+    """
+    p = paragraph._element
+    p.getparent().remove(p)
+
+
+def set_portrait_layout(section):
+    """
+    Set a section to portrait layout with standard margins.
+    """
+    section.orientation = WD_ORIENT.PORTRAIT
+    section.page_width = Inches(8.5)
+    section.page_height = Inches(11)
+    section.left_margin = Inches(1)
+    section.right_margin = Inches(1)
+    section.top_margin = Inches(1)
+    section.bottom_margin = Inches(1)
+
+
+def clear_section_footer(section):
+    """
+    Remove inherited footer content from a section.
+    """
+    unlink_footer_from_previous(section)
+    footer = section.footer
+    for paragraph in footer.paragraphs:
+        clear_footer(paragraph)
+
+
+def append_document_contents(target_doc, source_path):
+    """
+    Append all body content from a Word document into the target document.
+    """
+    source_doc = Document(source_path)
+
+    if len(target_doc.paragraphs) == 1 and target_doc.paragraphs[0].text == "" and len(target_doc.tables) == 0:
+        remove_paragraph(target_doc.paragraphs[0])
+
+    target_body = target_doc.element.body
+    insert_at = len(target_body)
+    if len(target_body) > 0 and target_body[-1].tag == qn("w:sectPr"):
+        insert_at -= 1
+
+    for element in source_doc.element.body:
+        if element.tag == qn("w:sectPr"):
+            continue
+        target_body.insert(insert_at, deepcopy(element))
+        insert_at += 1
+
+
 def add_table_of_contents(doc, puzzle_titles):
     """
     Add a manual table of contents for the puzzle pages.
@@ -240,22 +306,22 @@ def add_table_of_contents(doc, puzzle_titles):
     """
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title_p.paragraph_format.space_before = Pt(12)
-    title_p.paragraph_format.space_after = Pt(18)
+    title_p.paragraph_format.space_before = Pt(8)
+    title_p.paragraph_format.space_after = Pt(12)
 
     title_run = title_p.add_run("Table of Contents")
     title_run.bold = True
-    title_run.font.size = Pt(22)
-    title_run.font.name = "Arial"
+    title_run.font.size = Pt(TITLE_FONT_SIZE)
+    title_run.font.name = "Arial Rounded MT Bold"
 
     if not puzzle_titles:
         empty_p = doc.add_paragraph()
-        empty_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        empty_p.alignment = WD_ALIGN_PARAGRAPH.LEFT
         empty_p.paragraph_format.space_before = Pt(0)
-        empty_p.paragraph_format.space_after = Pt(0)
+        empty_p.paragraph_format.space_after = Pt(8)
 
         empty_run = empty_p.add_run("No puzzles available.")
-        empty_run.font.size = Pt(12)
+        empty_run.font.size = Pt(16)
         empty_run.font.name = "Arial"
         return
 
@@ -264,16 +330,35 @@ def add_table_of_contents(doc, puzzle_titles):
         entry_p.paragraph_format.space_before = Pt(0)
         entry_p.paragraph_format.space_after = Pt(6)
         entry_p.paragraph_format.tab_stops.add_tab_stop(
-            Inches(6.5), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.DOTS
+            Inches(6.0), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.DOTS
         )
 
         title_run = entry_p.add_run(title)
-        title_run.font.size = Pt(12)
+        title_run.font.size = Pt(16)
         title_run.font.name = "Arial"
 
         page_run = entry_p.add_run(f"\t{page_number}")
-        page_run.font.size = Pt(12)
+        page_run.font.size = Pt(16)
         page_run.font.name = "Arial"
+
+
+def prepare_puzzle_data(puzzle_titles, puzzles):
+    """
+    Build puzzle grids once so puzzle pages and answer keys stay aligned.
+    """
+    prepared = []
+    for i, puzzle in enumerate(puzzles):
+        title = puzzle_titles[i]
+        grid, placed_words = build_grid(puzzle)
+        prepared.append(
+            {
+                "title": title,
+                "grid": grid,
+                "placed_words": placed_words,
+                "positions": get_answer_positions(placed_words),
+            }
+        )
+    return prepared
 
 
 def clear_footer(paragraph):
@@ -394,26 +479,18 @@ def set_landscape_with_footer(section, left_text, right_text):
     setup_footer_for_section(section, left_text, right_text)
 
 
-def build_puzzles_doc(puzzle_titles, puzzles):
+def add_puzzles_content(doc, prepared_puzzles):
     """
-    Build the puzzles-only document.
+    Add puzzle pages to the current document.
     """
-    doc = Document()
-    add_table_of_contents(doc, puzzle_titles)
-
-    section = doc.add_section(WD_SECTION.NEW_PAGE)
-
-    # Footer text for puzzle pages
-    set_landscape_with_footer(section, "Book One Puzzles", "Puzzles by Riley")
-    set_page_number_start(section, 1)
-
-    for i, puzzle in enumerate(puzzles, start=1):
+    for i, puzzle_data in enumerate(prepared_puzzles, start=1):
         # Start each puzzle on a new page except the first one
         if i > 1:
             doc.add_page_break()
 
-        title = puzzle_titles[i - 1]
-        grid, _placed_words = build_grid(puzzle)
+        title = puzzle_data["title"]
+        grid = puzzle_data["grid"]
+        placed_words = puzzle_data["placed_words"]
 
         add_spacer(doc, 6)
         add_title(doc, title)
@@ -439,7 +516,7 @@ def build_puzzles_doc(puzzle_titles, puzzles):
         add_spacer(doc, 10)
 
         # Word bank
-        words_only = [word for word, _, _ in puzzle]
+        words_only = [word for word, _, _ in placed_words]
         word_bank = doc.add_table(rows=2, cols=4)
         word_bank.alignment = WD_TABLE_ALIGNMENT.CENTER
         remove_table_borders(word_bank)
@@ -459,34 +536,18 @@ def build_puzzles_doc(puzzle_titles, puzzles):
                     style_word_cell(cell)
                 index += 1
 
-    return doc
-
-
-def build_answers_doc(puzzle_titles, puzzles):
+def add_answers_content(doc, prepared_puzzles):
     """
-    Build the answer-key-only document.
+    Add answer key pages to the current document.
     Each answer page contains up to 4 answer grids.
     """
-    answer_keys = []
-    for i, puzzle in enumerate(puzzles):
-        title = puzzle_titles[i]
-        grid, placed_words = build_grid(puzzle)
-        answer_keys.append((title, grid, get_answer_positions(placed_words)))
-
-    doc = Document()
-    section = doc.sections[0]
-
-    # Footer text for answer key pages
-    set_landscape_with_footer(section, "Book One Answer Key", "Puzzles by Riley")
-    set_page_number_start(section, 1)
-
     first_page = True
-    for start in range(0, len(answer_keys), 4):
+    for start in range(0, len(prepared_puzzles), 4):
         if not first_page:
             doc.add_page_break()
         first_page = False
 
-        block = answer_keys[start:start + 4]
+        block = prepared_puzzles[start:start + 4]
 
         add_spacer(doc, 4)
 
@@ -504,7 +565,10 @@ def build_answers_doc(puzzle_titles, puzzles):
                 outer_cell = answer_page.cell(rr, cc)
 
                 if slot < len(block):
-                    title, grid, positions = block[slot]
+                    puzzle_data = block[slot]
+                    title = puzzle_data["title"]
+                    grid = puzzle_data["grid"]
+                    positions = puzzle_data["positions"]
 
                     top_space = outer_cell.paragraphs[0]
                     top_space.paragraph_format.space_before = Pt(0)
@@ -547,6 +611,43 @@ def build_answers_doc(puzzle_titles, puzzles):
                                 run.font.color.rgb = RGBColor(255, 0, 0)
 
                 slot += 1
+
+
+def build_combined_book_doc(puzzle_titles, puzzles):
+    """
+    Build the full book in this order:
+    cover, copyright, instruction, table of contents,
+    puzzles, answer keys, back cover.
+    """
+    prepared_puzzles = prepare_puzzle_data(puzzle_titles, puzzles)
+
+    doc = Document()
+    set_portrait_layout(doc.sections[0])
+    clear_section_footer(doc.sections[0])
+
+    append_document_contents(doc, COVER_PATH)
+    doc.add_page_break()
+    append_document_contents(doc, COPYRIGHT_PATH)
+    doc.add_page_break()
+    append_document_contents(doc, INSTRUCTIONS_PATH)
+    doc.add_page_break()
+    add_table_of_contents(doc, [puzzle_data["title"] for puzzle_data in prepared_puzzles])
+
+    if prepared_puzzles:
+        puzzle_section = doc.add_section(WD_SECTION.NEW_PAGE)
+        set_landscape_with_footer(puzzle_section, "Book One Puzzles", "Puzzles by Riley")
+        set_page_number_start(puzzle_section, 1)
+        add_puzzles_content(doc, prepared_puzzles)
+
+        answer_section = doc.add_section(WD_SECTION.NEW_PAGE)
+        set_landscape_with_footer(answer_section, "Book One Answer Key", "Puzzles by Riley")
+        set_page_number_start(answer_section, 1)
+        add_answers_content(doc, prepared_puzzles)
+
+    back_cover_section = doc.add_section(WD_SECTION.NEW_PAGE)
+    set_portrait_layout(back_cover_section)
+    clear_section_footer(back_cover_section)
+    append_document_contents(doc, BACK_COVER_PATH)
 
     return doc
 
@@ -601,8 +702,8 @@ def main():
     Main program flow:
     - verify Excel exists
     - load puzzle data
-    - build puzzle and answer docs
-    - save them
+    - build the combined book
+    - save it
     - open output folder
     """
     try:
@@ -618,30 +719,19 @@ def main():
         puzzle_titles, puzzles = load_puzzles_from_excel(EXCEL_PATH)
 
         if not puzzles:
-            print("No puzzles were found in the Excel file.")
-            input("Press Enter to close...")
-            return
+            print("No puzzles were found in the Excel file. Creating book with front and back matter only.")
 
-        puzzles_doc = build_puzzles_doc(puzzle_titles, puzzles)
-        answers_doc = build_answers_doc(puzzle_titles, puzzles)
+        combined_doc = build_combined_book_doc(puzzle_titles, puzzles)
 
-        final_puzzles_path = get_available_output_path(
-            os.path.join(OUTPUT_FOLDER, "wordsearch_puzzles_only.docx")
+        final_book_path = get_available_output_path(
+            os.path.join(OUTPUT_FOLDER, "wordsearch_book_complete.docx")
         )
 
-        final_answers_path = get_available_output_path(
-            os.path.join(OUTPUT_FOLDER, "wordsearch_answer_key_only.docx")
-        )
-
-        save_document_safely(puzzles_doc, final_puzzles_path)
-        save_document_safely(answers_doc, final_answers_path)
+        save_document_safely(combined_doc, final_book_path)
 
         print()
-        print("Saved puzzles document to:")
-        print(final_puzzles_path)
-        print()
-        print("Saved answer key document to:")
-        print(final_answers_path)
+        print("Saved combined book to:")
+        print(final_book_path)
         print()
         print("Opening output folder...")
         open_folder(OUTPUT_FOLDER)
