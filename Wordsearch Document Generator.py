@@ -7,7 +7,7 @@ from docx import Document  # type: ignore
 from docx.shared import Pt, Inches, RGBColor  # type: ignore
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT, WD_TAB_LEADER  # type: ignore
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE  # type: ignore
-from docx.enum.section import WD_ORIENT  # type: ignore
+from docx.enum.section import WD_ORIENT, WD_SECTION  # type: ignore
 from docx.oxml import OxmlElement  # type: ignore
 from docx.oxml.ns import qn  # type: ignore
 
@@ -230,6 +230,52 @@ def add_spacer(doc, points_after):
     p.paragraph_format.space_after = Pt(points_after)
 
 
+def add_table_of_contents(doc, puzzle_titles):
+    """
+    Add a manual table of contents for the puzzle pages.
+
+    Puzzle pages always begin in the next section and restart page
+    numbering at 1, so the page references here stay stable even if
+    the TOC itself grows to multiple pages.
+    """
+    title_p = doc.add_paragraph()
+    title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title_p.paragraph_format.space_before = Pt(12)
+    title_p.paragraph_format.space_after = Pt(18)
+
+    title_run = title_p.add_run("Table of Contents")
+    title_run.bold = True
+    title_run.font.size = Pt(22)
+    title_run.font.name = "Arial"
+
+    if not puzzle_titles:
+        empty_p = doc.add_paragraph()
+        empty_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        empty_p.paragraph_format.space_before = Pt(0)
+        empty_p.paragraph_format.space_after = Pt(0)
+
+        empty_run = empty_p.add_run("No puzzles available.")
+        empty_run.font.size = Pt(12)
+        empty_run.font.name = "Arial"
+        return
+
+    for page_number, title in enumerate(puzzle_titles, start=1):
+        entry_p = doc.add_paragraph()
+        entry_p.paragraph_format.space_before = Pt(0)
+        entry_p.paragraph_format.space_after = Pt(6)
+        entry_p.paragraph_format.tab_stops.add_tab_stop(
+            Inches(6.5), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.DOTS
+        )
+
+        title_run = entry_p.add_run(title)
+        title_run.font.size = Pt(12)
+        title_run.font.name = "Arial"
+
+        page_run = entry_p.add_run(f"\t{page_number}")
+        page_run.font.size = Pt(12)
+        page_run.font.name = "Arial"
+
+
 def clear_footer(paragraph):
     """
     Remove everything currently inside a footer paragraph.
@@ -353,7 +399,9 @@ def build_puzzles_doc(puzzle_titles, puzzles):
     Build the puzzles-only document.
     """
     doc = Document()
-    section = doc.sections[0]
+    add_table_of_contents(doc, puzzle_titles)
+
+    section = doc.add_section(WD_SECTION.NEW_PAGE)
 
     # Footer text for puzzle pages
     set_landscape_with_footer(section, "Book One Puzzles", "Puzzles by Riley")
