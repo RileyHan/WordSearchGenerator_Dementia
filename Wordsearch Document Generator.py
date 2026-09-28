@@ -1,56 +1,64 @@
+import os
 import random
 import string
-import os
 import subprocess
+from copy import deepcopy
+
 from openpyxl import load_workbook  # type: ignore
 from docx import Document  # type: ignore
-from docx.shared import Pt, Inches, RGBColor  # type: ignore
+from docx.enum.section import WD_ORIENT, WD_SECTION_START  # type: ignore
+from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT  # type: ignore
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT, WD_TAB_LEADER  # type: ignore
-from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE  # type: ignore
-from docx.enum.section import WD_ORIENT  # type: ignore
 from docx.oxml import OxmlElement  # type: ignore
 from docx.oxml.ns import qn  # type: ignore
+from docx.shared import Inches, Pt, RGBColor  # type: ignore
 
-# Puzzle size
 ROWS = 8
 COLS = 12
 
-# Main folder locations
 BASE_FOLDER = r"C:\Users\riley\OneDrive\Desktop\wordsearch_booklet"
 EXCEL_PATH = os.path.join(BASE_FOLDER, "Book2.xlsx")
 OUTPUT_FOLDER = BASE_FOLDER
 
-# Font sizes for puzzle pages
 TITLE_FONT_SIZE = 26
 GRID_FONT_SIZE = 36
 WORD_FONT_SIZE = 18
-
-# Puzzle page table sizing
 GRID_CELL_WIDTH = 58
 GRID_ROW_HEIGHT = 42
 WORD_BANK_ROW_HEIGHT = 24
 WORD_BANK_COL_WIDTH = 155
 
-# Landscape page margins
 LANDSCAPE_TOP_MARGIN = 0.25
 LANDSCAPE_BOTTOM_MARGIN = 0.25
 LANDSCAPE_LEFT_MARGIN = 0.25
 LANDSCAPE_RIGHT_MARGIN = 0.25
 
-# Answer key formatting
 ANSWER_TITLE_SIZE = 16
 ANSWER_GRID_FONT_SIZE = 14
 ANSWER_CELL_SIZE = 24
 ANSWER_BLOCK_HEIGHT = 255
 
+TOC_TITLE_SIZE = 20
+TOC_HEADING_SIZE = 14
+TOC_ENTRY_SIZE = 12
+TOC_ENTRIES_PER_PAGE = 28
+
+SCRIPT_FOLDER = os.path.dirname(os.path.abspath(__file__))
+COVER_TEMPLATE_PATH = os.path.join(SCRIPT_FOLDER, "Puzzles Cover.docx")
+COPYRIGHT_TEMPLATE_PATH = os.path.join(SCRIPT_FOLDER, "Puzzles Copyright.docx")
+INSTRUCTIONS_TEMPLATE_PATH = os.path.join(SCRIPT_FOLDER, "Puzzles Instructions.docx")
+BACK_COVER_TEMPLATE_PATH = os.path.join(SCRIPT_FOLDER, "Puzzles Back Cover.docx")
+COVER_SUBTITLE_TEXT = "Simple, calming, and frustration-free word searches"
+
 
 def verify_required_paths():
-    """
-    Make sure the Excel file exists before trying to build anything.
-    """
-    required_files = [EXCEL_PATH]
-
-    print("Checking required files...")
+    required_files = [
+        EXCEL_PATH,
+        COVER_TEMPLATE_PATH,
+        COPYRIGHT_TEMPLATE_PATH,
+        INSTRUCTIONS_TEMPLATE_PATH,
+        BACK_COVER_TEMPLATE_PATH,
+    ]
     for file_path in required_files:
         print(f"  {file_path}")
         if not os.path.isfile(file_path):
@@ -58,132 +66,97 @@ def verify_required_paths():
 
 
 def load_puzzles_from_excel(file_path):
-    """
-    Load puzzle titles and words from the Excel workbook.
+    workbook = load_workbook(file_path, data_only=True)
+    worksheet = workbook.worksheets[0]
+    titles, puzzles = [], []
 
-    Expected format:
-    - Column A = puzzle title
-    - Remaining columns = words for that puzzle
-
-    Rules:
-    - blank rows are skipped
-    - blank cells are skipped
-    - words longer than COLS are skipped
-    - puzzles are limited to ROWS words
-    """
-    wb = load_workbook(file_path, data_only=True)
-    ws = wb.worksheets[0]
-
-    puzzle_titles = []
-    puzzles = []
-
-    for excel_row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+    for row_number, row in enumerate(
+        worksheet.iter_rows(min_row=2, values_only=True), start=2
+    ):
         if not row or row[0] is None:
             continue
 
         title = str(row[0]).strip()
-        if title == "":
-            continue
-
         words = []
-        for cell in row[1:]:
-            if cell is None:
+        for value in row[1:]:
+            if value is None:
                 continue
-
-            word = str(cell).strip().upper()
-            if word == "":
+            word = str(value).strip().upper()
+            if not word:
                 continue
-
             if len(word) > COLS:
-                print(f"Skipping word '{word}' in row {excel_row_num}: too long for {COLS} columns")
+                print(f"Skipping word '{word}' in row {row_number}: too long for {COLS} columns")
                 continue
-
-            # Store word with placeholder row/column values
             words.append((word, 1, 1))
 
         if len(words) > ROWS:
-            print(f"Row {excel_row_num} has more than {ROWS} words. Extra words will be ignored.")
+            print(f"Row {row_number} has more than {ROWS} words. Extra words will be ignored.")
             words = words[:ROWS]
 
-        if words:
-            puzzle_titles.append(title)
+        if title and words:
+            titles.append(title)
             puzzles.append(words)
 
-    return puzzle_titles, puzzles
+    return titles, puzzles
 
 
 def build_grid(words):
-    """
-    Create a puzzle grid:
-    - each word is placed horizontally on a random row
-    - remaining blanks are filled with random letters
-
-    Returns:
-    - completed grid
-    - placed word positions
-    """
     grid = [["" for _ in range(COLS)] for _ in range(ROWS)]
-
-    shuffled_rows = list(range(ROWS))
-    random.shuffle(shuffled_rows)
-
+    available_rows = list(range(ROWS))
+    random.shuffle(available_rows)
     placed_words = []
 
     for index, (word, _, _) in enumerate(words):
-        r = shuffled_rows[index]
-        max_start = COLS - len(word)
-        c = random.randint(0, max_start)
+        row = available_rows[index]
+        column = random.randint(0, COLS - len(word))
+        for offset, character in enumerate(word):
+            grid[row][column + offset] = character
+        placed_words.append((word, row + 1, column + 1))
 
-        for i, ch in enumerate(word):
-            grid[r][c + i] = ch
-
-        # Store as 1-based row/column positions
-        placed_words.append((word, r + 1, c + 1))
-
-    # Fill remaining blank spots with random uppercase letters
-    for r in range(ROWS):
-        for c in range(COLS):
-            if grid[r][c] == "":
-                grid[r][c] = random.choice(string.ascii_uppercase)
+    for row in range(ROWS):
+        for column in range(COLS):
+            if not grid[row][column]:
+                grid[row][column] = random.choice(string.ascii_uppercase)
 
     return grid, placed_words
 
 
-def get_answer_positions(words):
-    """
-    Convert placed word data into a set of coordinates
-    so answer-key letters can be colored red.
-    """
+def get_answer_positions(placed_words):
     positions = set()
-    for word, r, c in words:
-        r -= 1
-        c -= 1
-        for i in range(len(word)):
-            if 0 <= r < ROWS and 0 <= c + i < COLS:
-                positions.add((r, c + i))
+    for word, row, column in placed_words:
+        row -= 1
+        column -= 1
+        for offset in range(len(word)):
+            if 0 <= row < ROWS and 0 <= column + offset < COLS:
+                positions.add((row, column + offset))
     return positions
 
 
+def build_puzzle_layouts(titles, puzzles):
+    layouts = []
+    for title, puzzle in zip(titles, puzzles):
+        grid, placed_words = build_grid(puzzle)
+        layouts.append(
+            {
+                "title": title,
+                "words": puzzle,
+                "grid": grid,
+                "answer_positions": get_answer_positions(placed_words),
+            }
+        )
+    return layouts
+
+
 def remove_table_borders(table):
-    """
-    Remove all visible borders from a table.
-    """
-    tbl = table._tbl
-    tblPr = tbl.tblPr
-
     borders = OxmlElement("w:tblBorders")
-    for edge in ["top", "left", "bottom", "right", "insideH", "insideV"]:
-        elem = OxmlElement(f"w:{edge}")
-        elem.set(qn("w:val"), "nil")
-        borders.append(elem)
-
-    tblPr.append(borders)
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        element = OxmlElement(f"w:{edge}")
+        element.set(qn("w:val"), "nil")
+        borders.append(element)
+    table._tbl.tblPr.append(borders)
 
 
 def style_grid_cell(cell):
-    """
-    Apply formatting to puzzle grid cells.
-    """
     for paragraph in cell.paragraphs:
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         paragraph.paragraph_format.space_before = Pt(0)
@@ -194,9 +167,6 @@ def style_grid_cell(cell):
 
 
 def style_word_cell(cell):
-    """
-    Apply formatting to word-bank cells.
-    """
     for paragraph in cell.paragraphs:
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         paragraph.paragraph_format.space_before = Pt(0)
@@ -206,138 +176,89 @@ def style_word_cell(cell):
             run.font.name = "Arial"
 
 
-def add_title(doc, title_text):
-    """
-    Add a centered puzzle title.
-    """
-    p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.paragraph_format.space_before = Pt(8)
-    p.paragraph_format.space_after = Pt(12)
+def add_spacer(doc, points_after):
+    paragraph = doc.add_paragraph()
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(points_after)
 
-    run = p.add_run(f'"{title_text}"')
+
+def add_title(doc, title):
+    paragraph = doc.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.paragraph_format.space_before = Pt(8)
+    paragraph.paragraph_format.space_after = Pt(12)
+    run = paragraph.add_run(f'"{title}"')
     run.bold = True
     run.font.size = Pt(TITLE_FONT_SIZE)
     run.font.name = "Arial Rounded MT Bold"
 
 
-def add_spacer(doc, points_after):
-    """
-    Add an empty paragraph used for vertical spacing.
-    """
-    p = doc.add_paragraph()
-    p.paragraph_format.space_before = Pt(0)
-    p.paragraph_format.space_after = Pt(points_after)
-
-
 def clear_footer(paragraph):
-    """
-    Remove everything currently inside a footer paragraph.
-    """
-    p = paragraph._element
-    for child in list(p):
-        p.remove(child)
+    element = paragraph._element
+    for child in list(element):
+        element.remove(child)
 
 
-def unlink_footer_from_previous(section):
-    """
-    Ensure this section has its own footer instead of inheriting
-    from a previous section.
-    """
+def unlink_footer(section):
     section.footer.is_linked_to_previous = False
 
 
-def ensure_pgNumType(sectPr):
-    """
-    Make sure the section has a page-number settings element.
-    """
-    pg_num_type = sectPr.find(qn("w:pgNumType"))
-    if pg_num_type is None:
-        pg_num_type = OxmlElement("w:pgNumType")
-        sectPr.append(pg_num_type)
-    return pg_num_type
+def ensure_page_number_settings(section):
+    element = section._sectPr.find(qn("w:pgNumType"))
+    if element is None:
+        element = OxmlElement("w:pgNumType")
+        section._sectPr.append(element)
+    return element
 
 
-def set_page_number_start(section, start_value):
-    """
-    Set the starting page number for a section.
-    """
-    sectPr = section._sectPr
-    pg_num_type = ensure_pgNumType(sectPr)
-    pg_num_type.set(qn("w:start"), str(start_value))
+def set_page_number_start(section, number):
+    ensure_page_number_settings(section).set(qn("w:start"), str(number))
 
 
-def setup_footer_for_section(section, left_text, right_text):
-    """
-    Create a footer with:
-    - left text
-    - centered page number
-    - right text
-    """
-    unlink_footer_from_previous(section)
-    footer = section.footer
-    paragraph = footer.paragraphs[0]
+def continue_page_numbering(section):
+    element = section._sectPr.find(qn("w:pgNumType"))
+    if element is not None:
+        section._sectPr.remove(element)
 
+
+def setup_footer(section, left_text, right_text):
+    unlink_footer(section)
+    paragraph = section.footer.paragraphs[0]
     clear_footer(paragraph)
-
-    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
     paragraph.paragraph_format.space_before = Pt(0)
     paragraph.paragraph_format.space_after = Pt(0)
-
-    # Extra spacing from left and right edges
     paragraph.paragraph_format.left_indent = Inches(0.35)
     paragraph.paragraph_format.right_indent = Inches(0.35)
+    stops = paragraph.paragraph_format.tab_stops
+    stops.add_tab_stop(Inches(5.35), WD_TAB_ALIGNMENT.CENTER, WD_TAB_LEADER.SPACES)
+    stops.add_tab_stop(Inches(9.95), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.SPACES)
 
-    tab_stops = paragraph.paragraph_format.tab_stops
-
-    # Center page number
-    tab_stops.add_tab_stop(Inches(5.35), WD_TAB_ALIGNMENT.CENTER, WD_TAB_LEADER.SPACES)
-
-    # Pull right-side footer text inward a bit
-    tab_stops.add_tab_stop(Inches(9.95), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.SPACES)
-
-    # Left footer text
-    left_run = paragraph.add_run(left_text)
-    left_run.font.name = "Arial"
-    left_run.font.size = Pt(10)
-
+    left = paragraph.add_run(left_text)
+    left.font.name = "Arial"
+    left.font.size = Pt(10)
     paragraph.add_run("\t")
 
-    # Page number field
-    page_run = paragraph.add_run()
-    page_run.font.name = "Arial"
-    page_run.font.size = Pt(10)
-
-    fld_char_begin = OxmlElement("w:fldChar")
-    fld_char_begin.set(qn("w:fldCharType"), "begin")
-
-    instr_text = OxmlElement("w:instrText")
-    instr_text.set(qn("xml:space"), "preserve")
-    instr_text.text = "PAGE"
-
-    fld_char_sep = OxmlElement("w:fldChar")
-    fld_char_sep.set(qn("w:fldCharType"), "separate")
-
-    fld_char_end = OxmlElement("w:fldChar")
-    fld_char_end.set(qn("w:fldCharType"), "end")
-
-    page_run._r.append(fld_char_begin)
-    page_run._r.append(instr_text)
-    page_run._r.append(fld_char_sep)
-    page_run._r.append(fld_char_end)
-
+    page = paragraph.add_run()
+    page.font.name = "Arial"
+    page.font.size = Pt(10)
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    instruction = OxmlElement("w:instrText")
+    instruction.set(qn("xml:space"), "preserve")
+    instruction.text = "PAGE"
+    separate = OxmlElement("w:fldChar")
+    separate.set(qn("w:fldCharType"), "separate")
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+    page._r.extend([begin, instruction, separate, end])
     paragraph.add_run("\t")
 
-    # Right footer text
-    right_run = paragraph.add_run(right_text)
-    right_run.font.name = "Arial"
-    right_run.font.size = Pt(10)
+    right = paragraph.add_run(right_text)
+    right.font.name = "Arial"
+    right.font.size = Pt(10)
 
 
 def set_landscape_with_footer(section, left_text, right_text):
-    """
-    Set a section to landscape layout and apply footer formatting.
-    """
     section.orientation = WD_ORIENT.LANDSCAPE
     section.page_width = Inches(11)
     section.page_height = Inches(8.5)
@@ -345,200 +266,253 @@ def set_landscape_with_footer(section, left_text, right_text):
     section.right_margin = Inches(LANDSCAPE_RIGHT_MARGIN)
     section.top_margin = Inches(LANDSCAPE_TOP_MARGIN)
     section.bottom_margin = Inches(LANDSCAPE_BOTTOM_MARGIN)
-    setup_footer_for_section(section, left_text, right_text)
+    section.footer_distance = Inches(LANDSCAPE_BOTTOM_MARGIN)
+    setup_footer(section, left_text, right_text)
 
 
-def build_puzzles_doc(puzzle_titles, puzzles):
-    """
-    Build the puzzles-only document.
-    """
-    doc = Document()
-    section = doc.sections[0]
+def set_layout_from_template(section, template_path):
+    template_section = Document(template_path).sections[0]
+    section.orientation = template_section.orientation
+    section.page_width = template_section.page_width
+    section.page_height = template_section.page_height
+    section.left_margin = template_section.left_margin
+    section.right_margin = template_section.right_margin
+    section.top_margin = template_section.top_margin
+    section.bottom_margin = template_section.bottom_margin
+    section.header_distance = template_section.header_distance
+    section.footer_distance = template_section.footer_distance
 
-    # Footer text for puzzle pages
-    set_landscape_with_footer(section, "Book One Puzzles", "Puzzles by Riley")
-    set_page_number_start(section, 1)
 
-    for i, puzzle in enumerate(puzzles, start=1):
-        # Start each puzzle on a new page except the first one
-        if i > 1:
+def clear_footer_for_section(section):
+    unlink_footer(section)
+    clear_footer(section.footer.paragraphs[0])
+
+
+def append_document_body(destination, source_path):
+    source = Document(source_path)
+    destination_body = destination._element.body
+    section_properties = destination_body.sectPr
+    if section_properties is not None:
+        destination_body.remove(section_properties)
+
+    for element in source._element.body.iterchildren():
+        if element.tag != qn("w:sectPr"):
+            destination_body.append(deepcopy(element))
+
+    if section_properties is not None:
+        destination_body.append(section_properties)
+
+
+def center_cover_subtitle(doc):
+    for paragraph in doc.paragraphs:
+        if paragraph.text.strip() == COVER_SUBTITLE_TEXT:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            break
+
+
+def add_toc_heading(doc, text):
+    paragraph = doc.add_paragraph()
+    paragraph.paragraph_format.space_before = Pt(6)
+    paragraph.paragraph_format.space_after = Pt(3)
+    run = paragraph.add_run(text)
+    run.bold = True
+    run.font.size = Pt(TOC_HEADING_SIZE)
+    run.font.name = "Arial"
+
+
+def add_toc_entry(doc, text, page_number):
+    paragraph = doc.add_paragraph()
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
+    paragraph.paragraph_format.left_indent = Inches(0.25)
+    paragraph.paragraph_format.tab_stops.add_tab_stop(
+        Inches(6.5), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.DOTS
+    )
+    title = paragraph.add_run(text)
+    title.font.size = Pt(TOC_ENTRY_SIZE)
+    title.font.name = "Arial"
+    paragraph.add_run("\t")
+    page = paragraph.add_run(str(page_number))
+    page.font.size = Pt(TOC_ENTRY_SIZE)
+    page.font.name = "Arial"
+
+
+def add_table_of_contents(doc, layouts):
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title.paragraph_format.space_after = Pt(10)
+    title_run = title.add_run("Table of Contents")
+    title_run.bold = True
+    title_run.font.size = Pt(TOC_TITLE_SIZE)
+    title_run.font.name = "Arial Rounded MT Bold"
+
+    entries = [("heading", "Puzzles", 1)]
+    entries.extend(("entry", layout["title"], index) for index, layout in enumerate(layouts, 1))
+    answer_start = len(layouts) + 1
+    entries.append(("heading", "Answer Keys", answer_start))
+    entries.extend(
+        (
+            "entry",
+            f'Answer Key: "{layout["title"]}"',
+            answer_start + index // 4,
+        )
+        for index, layout in enumerate(layouts)
+    )
+
+    for index, (kind, text, page_number) in enumerate(entries):
+        if index and index % TOC_ENTRIES_PER_PAGE == 0:
+            doc.add_page_break()
+        if kind == "heading":
+            add_toc_heading(doc, text)
+        else:
+            add_toc_entry(doc, text, page_number)
+
+
+def add_puzzle_pages(doc, layouts):
+    for index, layout in enumerate(layouts):
+        if index:
             doc.add_page_break()
 
-        title = puzzle_titles[i - 1]
-        grid, _placed_words = build_grid(puzzle)
-
         add_spacer(doc, 6)
-        add_title(doc, title)
+        add_title(doc, layout["title"])
         add_spacer(doc, 8)
 
-        # Puzzle letter grid
-        table = doc.add_table(rows=ROWS, cols=COLS)
-        table.alignment = WD_TABLE_ALIGNMENT.CENTER
-        remove_table_borders(table)
-
-        for row in table.rows:
+        grid_table = doc.add_table(rows=ROWS, cols=COLS)
+        grid_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        remove_table_borders(grid_table)
+        for row in grid_table.rows:
             row.height = Pt(GRID_ROW_HEIGHT)
             row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
             for cell in row.cells:
                 cell.width = Pt(GRID_CELL_WIDTH)
 
-        for r in range(ROWS):
-            for c in range(COLS):
-                cell = table.cell(r, c)
-                cell.text = grid[r][c]
+        for row in range(ROWS):
+            for column in range(COLS):
+                cell = grid_table.cell(row, column)
+                cell.text = layout["grid"][row][column]
                 style_grid_cell(cell)
 
         add_spacer(doc, 10)
-
-        # Word bank
-        words_only = [word for word, _, _ in puzzle]
-        word_bank = doc.add_table(rows=2, cols=4)
-        word_bank.alignment = WD_TABLE_ALIGNMENT.CENTER
-        remove_table_borders(word_bank)
-
-        for row in word_bank.rows:
+        word_table = doc.add_table(rows=2, cols=4)
+        word_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        remove_table_borders(word_table)
+        for row in word_table.rows:
             row.height = Pt(WORD_BANK_ROW_HEIGHT)
             row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
             for cell in row.cells:
                 cell.width = Pt(WORD_BANK_COL_WIDTH)
 
-        index = 0
-        for r in range(2):
-            for c in range(4):
-                cell = word_bank.cell(r, c)
-                if index < len(words_only):
-                    cell.text = words_only[index]
+        words = [word for word, _, _ in layout["words"]]
+        position = 0
+        for row in range(2):
+            for column in range(4):
+                if position < len(words):
+                    cell = word_table.cell(row, column)
+                    cell.text = words[position]
                     style_word_cell(cell)
-                index += 1
-
-    return doc
+                position += 1
 
 
-def build_answers_doc(puzzle_titles, puzzles):
-    """
-    Build the answer-key-only document.
-    Each answer page contains up to 4 answer grids.
-    """
-    answer_keys = []
-    for i, puzzle in enumerate(puzzles):
-        title = puzzle_titles[i]
-        grid, placed_words = build_grid(puzzle)
-        answer_keys.append((title, grid, get_answer_positions(placed_words)))
-
-    doc = Document()
-    section = doc.sections[0]
-
-    # Footer text for answer key pages
-    set_landscape_with_footer(section, "Book One Answer Key", "Puzzles by Riley")
-    set_page_number_start(section, 1)
-
-    first_page = True
-    for start in range(0, len(answer_keys), 4):
-        if not first_page:
+def add_answer_pages(doc, layouts):
+    for start in range(0, len(layouts), 4):
+        if start:
             doc.add_page_break()
-        first_page = False
 
-        block = answer_keys[start:start + 4]
-
-        add_spacer(doc, 4)
-
-        answer_page = doc.add_table(rows=2, cols=2)
-        answer_page.alignment = WD_TABLE_ALIGNMENT.CENTER
-        remove_table_borders(answer_page)
-
-        for row in answer_page.rows:
+        answer_table = doc.add_table(rows=2, cols=2)
+        answer_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        remove_table_borders(answer_table)
+        for row in answer_table.rows:
             row.height = Pt(ANSWER_BLOCK_HEIGHT)
             row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
 
-        slot = 0
-        for rr in range(2):
-            for cc in range(2):
-                outer_cell = answer_page.cell(rr, cc)
+        block = layouts[start:start + 4]
+        for slot, layout in enumerate(block):
+            outer_cell = answer_table.cell(slot // 2, slot % 2)
+            outer_cell.paragraphs[0].paragraph_format.space_after = Pt(8)
+            title_paragraph = outer_cell.add_paragraph()
+            title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            title_paragraph.paragraph_format.space_before = Pt(0)
+            title_paragraph.paragraph_format.space_after = Pt(8)
+            title_run = title_paragraph.add_run(f'Answer Key: "{layout["title"]}"')
+            title_run.bold = True
+            title_run.font.size = Pt(ANSWER_TITLE_SIZE)
+            title_run.font.name = "Arial"
 
-                if slot < len(block):
-                    title, grid, positions = block[slot]
+            mini = outer_cell.add_table(rows=ROWS, cols=COLS)
+            mini.alignment = WD_TABLE_ALIGNMENT.CENTER
+            remove_table_borders(mini)
+            for row in mini.rows:
+                row.height = Pt(ANSWER_CELL_SIZE)
+                row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+                for cell in row.cells:
+                    cell.width = Pt(ANSWER_CELL_SIZE)
 
-                    top_space = outer_cell.paragraphs[0]
-                    top_space.paragraph_format.space_before = Pt(0)
-                    top_space.paragraph_format.space_after = Pt(8)
+            for row in range(ROWS):
+                for column in range(COLS):
+                    cell = mini.cell(row, column)
+                    paragraph = cell.paragraphs[0]
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    paragraph.paragraph_format.space_before = Pt(0)
+                    paragraph.paragraph_format.space_after = Pt(0)
+                    run = paragraph.add_run(layout["grid"][row][column])
+                    run.font.size = Pt(ANSWER_GRID_FONT_SIZE)
+                    run.font.name = "Arial"
+                    if (row, column) in layout["answer_positions"]:
+                        run.font.color.rgb = RGBColor(255, 0, 0)
 
-                    title_p = outer_cell.add_paragraph()
-                    title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    title_p.paragraph_format.space_before = Pt(0)
-                    title_p.paragraph_format.space_after = Pt(8)
 
-                    title_run = title_p.add_run(f'Answer Key: "{title}"')
-                    title_run.bold = True
-                    title_run.font.size = Pt(ANSWER_TITLE_SIZE)
-                    title_run.font.name = "Arial"
+def build_booklet_doc(layouts):
+    doc = Document(COVER_TEMPLATE_PATH)
+    center_cover_subtitle(doc)
 
-                    mini = outer_cell.add_table(rows=ROWS, cols=COLS)
-                    mini.alignment = WD_TABLE_ALIGNMENT.CENTER
-                    remove_table_borders(mini)
+    doc.add_page_break()
+    append_document_body(doc, COPYRIGHT_TEMPLATE_PATH)
+    doc.add_page_break()
+    append_document_body(doc, INSTRUCTIONS_TEMPLATE_PATH)
+    doc.add_page_break()
+    add_table_of_contents(doc, layouts)
 
-                    for row in mini.rows:
-                        row.height = Pt(ANSWER_CELL_SIZE)
-                        row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-                        for mini_cell in row.cells:
-                            mini_cell.width = Pt(ANSWER_CELL_SIZE)
+    puzzle_section = doc.add_section(WD_SECTION_START.NEW_PAGE)
+    set_landscape_with_footer(puzzle_section, "Book One Puzzles", "Puzzles by Riley")
+    set_page_number_start(puzzle_section, 1)
+    add_puzzle_pages(doc, layouts)
 
-                    for r in range(ROWS):
-                        for c in range(COLS):
-                            mini_cell = mini.cell(r, c)
-                            para = mini_cell.paragraphs[0]
-                            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            para.paragraph_format.space_before = Pt(0)
-                            para.paragraph_format.space_after = Pt(0)
+    answer_section = doc.add_section(WD_SECTION_START.NEW_PAGE)
+    set_landscape_with_footer(answer_section, "Book One Answer Key", "Puzzles by Riley")
+    continue_page_numbering(answer_section)
+    add_answer_pages(doc, layouts)
 
-                            run = para.add_run(grid[r][c])
-                            run.font.size = Pt(ANSWER_GRID_FONT_SIZE)
-                            run.font.name = "Arial"
-
-                            # Highlight answer letters in red
-                            if (r, c) in positions:
-                                run.font.color.rgb = RGBColor(255, 0, 0)
-
-                slot += 1
-
+    back_cover_section = doc.add_section(WD_SECTION_START.NEW_PAGE)
+    set_layout_from_template(back_cover_section, BACK_COVER_TEMPLATE_PATH)
+    continue_page_numbering(back_cover_section)
+    clear_footer_for_section(back_cover_section)
+    append_document_body(doc, BACK_COVER_TEMPLATE_PATH)
     return doc
 
 
-def save_document_safely(doc, file_path):
-    """
-    Save the document. If the file is open/locked,
-    save with a numbered suffix instead.
-    """
-    base, ext = os.path.splitext(file_path)
+def save_document_safely(doc, path):
+    base, extension = os.path.splitext(path)
     counter = 1
-
     while True:
         try:
-            doc.save(file_path)
-            return file_path
+            doc.save(path)
+            return path
         except PermissionError:
-            file_path = f"{base}_{counter}{ext}"
+            path = f"{base}_{counter}{extension}"
             counter += 1
 
 
-def get_available_output_path(file_path):
-    """
-    Find a filename that doesn't already exist.
-    """
-    base, ext = os.path.splitext(file_path)
-    candidate = file_path
+def get_available_output_path(path):
+    base, extension = os.path.splitext(path)
+    candidate = path
     counter = 1
-
     while os.path.exists(candidate):
-        candidate = f"{base}_{counter}{ext}"
+        candidate = f"{base}_{counter}{extension}"
         counter += 1
-
     return candidate
 
 
 def open_folder(path):
-    """
-    Open the output folder in Windows Explorer.
-    """
     try:
         os.startfile(path)
     except Exception:
@@ -549,14 +523,6 @@ def open_folder(path):
 
 
 def main():
-    """
-    Main program flow:
-    - verify Excel exists
-    - load puzzle data
-    - build puzzle and answer docs
-    - save them
-    - open output folder
-    """
     try:
         print("Starting wordsearch generator...")
         print(f"Base folder: {BASE_FOLDER}")
@@ -566,45 +532,29 @@ def main():
 
         verify_required_paths()
         os.makedirs(OUTPUT_FOLDER, exist_ok=True)
-
-        puzzle_titles, puzzles = load_puzzles_from_excel(EXCEL_PATH)
-
+        titles, puzzles = load_puzzles_from_excel(EXCEL_PATH)
         if not puzzles:
             print("No puzzles were found in the Excel file.")
             input("Press Enter to close...")
             return
 
-        puzzles_doc = build_puzzles_doc(puzzle_titles, puzzles)
-        answers_doc = build_answers_doc(puzzle_titles, puzzles)
-
-        final_puzzles_path = get_available_output_path(
-            os.path.join(OUTPUT_FOLDER, "wordsearch_puzzles_only.docx")
+        layouts = build_puzzle_layouts(titles, puzzles)
+        booklet = build_booklet_doc(layouts)
+        output_path = get_available_output_path(
+            os.path.join(OUTPUT_FOLDER, "wordsearch_booklet.docx")
         )
-
-        final_answers_path = get_available_output_path(
-            os.path.join(OUTPUT_FOLDER, "wordsearch_answer_key_only.docx")
-        )
-
-        save_document_safely(puzzles_doc, final_puzzles_path)
-        save_document_safely(answers_doc, final_answers_path)
+        save_document_safely(booklet, output_path)
 
         print()
-        print("Saved puzzles document to:")
-        print(final_puzzles_path)
+        print("Saved complete booklet to:")
+        print(output_path)
         print()
-        print("Saved answer key document to:")
-        print(final_answers_path)
-        print()
-        print("Opening output folder...")
         open_folder(OUTPUT_FOLDER)
 
-    except Exception as e:
+    except Exception as error:
         print()
         print("An error occurred:")
-        print(str(e))
-        print()
-        print("Expected file:")
-        print(EXCEL_PATH)
+        print(str(error))
         print()
         print("Also make sure required packages are installed:")
         print("pip install openpyxl python-docx")
